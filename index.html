@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Instant Flow | Pro Max</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getDatabase, ref, onValue, push, set, update, query, orderByChild } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBGv4i-NQ_tGPCBMgX-c5rGHIYee9AD_9c",
+            authDomain: "asr-exrot-b1a05.firebaseapp.com",
+            databaseURL: "https://asr-exrot-b1a05-default-rtdb.firebaseio.com",
+            projectId: "asr-exrot-b1a05",
+            storageBucket: "asr-exrot-b1a05.firebasestorage.app",
+            messagingSenderId: "1072051243593",
+            appId: "1:1072051243593:web:51df71cb1ec70a52234d98"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getDatabase(app);
+
+        let currentRate = 3.00; // Default Task Price
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                document.getElementById('authUI').classList.add('hidden');
+                document.getElementById('appUI').classList.remove('hidden');
+                document.getElementById('setMail').innerText = user.email;
+                loadAdminSettings();
+                loadDashboard(user.uid);
+                loadHistory(user.uid);
+                loadLeaderboard(user.uid);
+                applySavedTheme();
+            } else {
+                document.getElementById('authUI').classList.remove('hidden');
+                document.getElementById('appUI').classList.add('hidden');
+            }
+        });
+
+        // Load Admin Notice and Rate
+        function loadAdminSettings() {
+            onValue(ref(db, 'admin/settings'), (snap) => {
+                const settings = snap.val() || { notice: "Welcome to Instant Flow! Start mining now.", task_rate: 3.00 };
+                document.getElementById('noticeText').innerText = settings.notice;
+                currentRate = parseFloat(settings.task_rate);
+                document.getElementById('taskRateLabel').innerText = `Rate: ${currentRate.toFixed(2)} TK`;
+            });
+        }
+
+        function loadDashboard(uid) {
+            onValue(ref(db, 'users/' + uid), (snap) => {
+                const data = snap.val() || { balance: 0, today: 0 };
+                document.querySelectorAll('.mainBal').forEach(el => el.innerText = (data.balance || 0).toFixed(2) + " TK");
+                document.getElementById('todayVal').innerText = (data.today || 0) + " IDs Done";
+                
+                // Calculate Hold Balance from Pending Submissions
+                onValue(ref(db, 'submissions/'), (subSnap) => {
+                    let pendingCount = 0;
+                    subSnap.forEach(child => {
+                        if(child.val().uid === uid && child.val().status === 'Pending') pendingCount++;
+                    });
+                    document.getElementById('holdVal').innerText = (pendingCount * currentRate).toFixed(2) + " TK";
+                });
+
+                // Rank System
+                let rank = "Bronze";
+                if(data.today > 20) rank = "Silver";
+                if(data.today > 100) rank = "Gold";
+                document.getElementById('userBadge').innerText = rank + " Worker";
+            });
+        }
+
+        function loadHistory(uid) {
+            onValue(ref(db, 'submissions/'), (snap) => {
+                let html = "";
+                const data = [];
+                snap.forEach(child => { if(child.val().uid === uid) data.push(child.val()); });
+                data.reverse().forEach(task => {
+                    const status = task.status || 'Pending';
+                    const sBg = status === 'Success' ? 'bg-green-500/10 text-green-500' : (status === 'Rejected' ? 'bg-red-500/10 text-red-500' : 'bg-yellow-500/10 text-yellow-500');
+                    html += `<div class="glass p-4 rounded-2xl flex justify-between items-center mb-3">
+                        <div><p class="text-[10px] font-bold">IG: ${task.username}</p><p class="text-[8px] opacity-40">${new Date(task.time).toLocaleTimeString()}</p></div>
+                        <span class="text-[9px] font-black uppercase px-3 py-1 rounded-lg ${sBg}">${status}</span>
+                    </div>`;
+                });
+                document.getElementById('historyList').innerHTML = html || "<p class='text-center text-xs opacity-50 py-10'>No Work History</p>";
+            });
+        }
+
+        function loadLeaderboard(myUid) {
+            const usersRef = query(ref(db, 'users'), orderByChild('today'));
+            onValue(usersRef, (snap) => {
+                let list = [];
+                snap.forEach(u => { if(u.val().email) list.push({ uid: u.key, name: u.val().email.split('@')[0], count: u.val().today || 0 }); });
+                list.sort((a,b) => b.count - a.count);
+                let html = "";
+                list.forEach((u, i) => {
+                    if(i < 10) {
+                        html += `<div class="flex justify-between items-center p-4 ${u.uid === myUid ? 'bg-primary/20 border-primary' : 'bg-black/20'} rounded-2xl mb-2 border border-white/5">
+                            <span class="text-xs font-bold">${i+1}. ${u.name}</span>
+                            <span class="text-xs font-black text-primary">${u.count} IDs</span>
+                        </div>`;
+                    }
+                });
+                document.getElementById('leaderList').innerHTML = html;
+            });
+        }
+
+        // Theme Switcher
+        const themes = {
+            midnight: { bg: "#020617", primary: "#3b82f6" },
+            sunset: { bg: "#1a0f0f", primary: "#f97316" },
+            emerald: { bg: "#061a14", primary: "#10b981" },
+            purple: { bg: "#0f0720", primary: "#a855f7" }
+        };
+
+        window.setTheme = (themeKey) => {
+            const theme = themes[themeKey];
+            document.body.style.backgroundColor = theme.bg;
+            document.documentElement.style.setProperty('--primary-color', theme.primary);
+            localStorage.setItem('userTheme', themeKey);
+            showToast("Theme Updated!");
+        };
+
+        function applySavedTheme() {
+            setTheme(localStorage.getItem('userTheme') || 'midnight');
+        }
+
+        window.showToast = (msg) => {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.classList.remove('hidden');
+            setTimeout(() => t.classList.add('hidden'), 3000);
+        };
+
+        window.copyText = (id) => {
+            navigator.clipboard.writeText(document.getElementById(id).innerText);
+            showToast("Copied!");
+        };
+
+        window.submitTask = () => {
+            const cookies = document.getElementById('cookies').value;
+            if(cookies.length < 30) return showToast("Invalid Cookies!");
+            push(ref(db, 'submissions/'), { 
+                uid: auth.currentUser.uid, 
+                email: auth.currentUser.email, 
+                username: document.getElementById('genUser').innerText, 
+                password: document.getElementById('genPass').innerText, 
+                cookies: cookies, 
+                status: "Pending", 
+                time: Date.now(),
+                price: currentRate
+            }).then(() => { window.location.href = "https://t.me/asrflow7"; });
+        };
+
+        window.logout = () => signOut(auth);
+    </script>
+
+    <style>
+        :root { --primary-color: #3b82f6; }
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
+        body { background: #020617; color: white; font-family: 'Plus Jakarta Sans', sans-serif; transition: 0.5s; overflow-x: hidden; }
+        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .section-hidden { display: none; }
+        .text-primary { color: var(--primary-color); }
+        .bg-primary { background-color: var(--primary-color); }
+        .border-primary { border-color: var(--primary-color); }
+        .active-tab { color: var(--primary-color); transform: translateY(-5px); transition: 0.3s; }
+        
+        /* Premium Notice Animation */
+        .notice-card {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(0, 0, 0, 0.2));
+            border-left: 4px solid var(--primary-color);
+        }
+
+        /* Method Selection Focus */
+        .wd-btn input:checked + div { border: 2px solid var(--primary-color); background: rgba(59, 130, 246, 0.1); }
+    </style>
+</head>
+<body class="pb-28">
+
+    <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 glass px-6 py-3 rounded-full text-xs font-bold text-white z-[1000] hidden animate__animated animate__fadeInUp"></div>
+
+    <div id="authUI" class="p-8 pt-32 max-w-md mx-auto">
+        <h1 style="font-family: 'Orbitron', sans-serif;" class="text-4xl font-black text-center text-primary italic tracking-tighter mb-10">INSTANT FLOW</h1>
+        <div class="glass p-8 rounded-[3rem] space-y-4">
+            <input id="email" type="email" placeholder="Email" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
+            <input id="pass" type="password" placeholder="Password" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
+            <button onclick="handleAuth('login')" class="w-full bg-primary py-4 rounded-2xl font-black uppercase text-xs">Login</button>
+        </div>
+    </div>
+
+    <div id="appUI" class="hidden">
+        <section id="home-sec" class="app-section p-6">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 style="font-family: 'Orbitron', sans-serif;" class="text-xl font-black italic text-primary">INSTANT FLOW</h2>
+                    <span id="userBadge" class="text-[8px] bg-white/10 px-2 py-0.5 rounded-full opacity-50 uppercase">Worker</span>
+                </div>
+                <a href="https://t.me/asrflow7" class="w-10 h-10 glass rounded-xl flex items-center justify-center text-primary"><i class="fab fa-telegram-plane"></i></a>
+            </div>
+
+            <div class="notice-card p-5 rounded-3xl mb-6 shadow-xl relative overflow-hidden">
+                <div class="flex items-center gap-3 mb-2">
+                    <i class="fas fa-bullhorn text-primary animate-bounce"></i>
+                    <span class="text-[10px] font-black uppercase tracking-widest opacity-50">System Notice</span>
+                </div>
+                <p id="noticeText" class="text-xs font-medium leading-relaxed opacity-90">Loading latest notice...</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="glass p-5 rounded-[2.5rem]">
+                    <p class="text-[9px] opacity-40 uppercase font-black mb-1">Balance</p>
+                    <h3 class="mainBal font-black text-xl text-green-400">0.00 TK</h3>
+                </div>
+                <div class="glass p-5 rounded-[2.5rem]">
+                    <p class="text-[9px] opacity-40 uppercase font-black mb-1">In Hold</p>
+                    <h3 id="holdVal" class="font-black text-xl text-yellow-400">0.00 TK</h3>
+                </div>
+            </div>
+
+            <div class="glass p-6 rounded-[3rem] flex justify-between items-center border border-white/10">
+                <div>
+                    <h4 class="font-black text-sm uppercase">Instagram Task</h4>
+                    <p id="taskRateLabel" class="text-[10px] text-primary font-bold mt-1">Rate: 3.00 TK</p>
+                </div>
+                <button onclick="openTask()" class="bg-primary px-10 py-4 rounded-2xl font-black text-xs shadow-lg shadow-primary/40">START</button>
+            </div>
+            <p id="todayVal" class="text-center text-[9px] opacity-40 mt-4 uppercase font-bold tracking-widest">Total 0 IDs Done Today</p>
+        </section>
+
+        <section id="wallet-sec" class="app-section section-hidden p-6">
+            <h2 class="text-2xl font-black mb-8 italic">Wallet Hub</h2>
+            <div class="glass p-10 rounded-[3rem] text-center mb-8 border-b-4 border-primary shadow-2xl">
+                <p class="text-[10px] opacity-40 uppercase mb-2">Available for Withdraw</p>
+                <h1 class="mainBal text-4xl font-black text-primary tracking-tighter">0.00 TK</h1>
+            </div>
+            <div class="space-y-4">
+                <div class="flex gap-4">
+                    <label class="wd-btn flex-1 cursor-pointer">
+                        <input type="radio" name="method" value="Bkash" class="hidden" checked>
+                        <div class="glass p-5 rounded-2xl text-center text-xs font-black border border-white/5 uppercase">BKASH</div>
+                    </label>
+                    <label class="wd-btn flex-1 cursor-pointer">
+                        <input type="radio" name="method" value="Nagad" class="hidden">
+                        <div class="glass p-5 rounded-2xl text-center text-xs font-black border border-white/5 uppercase">NAGAD</div>
+                    </label>
+                </div>
+                <input id="withdrawNum" type="number" placeholder="Enter Number" class="w-full bg-white/5 p-5 rounded-2xl outline-none border border-white/5 focus:border-primary">
+                <input id="withdrawAmt" type="number" placeholder="Enter Amount" class="w-full bg-white/5 p-5 rounded-2xl outline-none border border-white/5 focus:border-primary">
+                <button class="w-full bg-green-600 py-5 rounded-2xl font-black uppercase text-xs">Request Payment</button>
+            </div>
+        </section>
+
+        <section id="history-sec" class="app-section section-hidden p-6">
+            <h2 class="text-2xl font-black mb-8 italic">Work Logs</h2>
+            <div id="historyList" class="space-y-1"></div>
+        </section>
+
+        <section id="settings-sec" class="app-section section-hidden p-6">
+            <h2 class="text-2xl font-black mb-8 italic">Profile</h2>
+            <div class="glass p-6 rounded-[3rem] mb-6 flex items-center gap-5 border border-white/10 shadow-2xl">
+                <div class="w-16 h-16 bg-primary rounded-[1.5rem] flex items-center justify-center text-2xl font-black">U</div>
+                <div class="overflow-hidden"><p id="setMail" class="font-black text-sm truncate">User Email</p></div>
+            </div>
+
+            <div class="glass p-6 rounded-[2.5rem] mb-6">
+                <h4 class="text-[10px] font-black uppercase mb-5 opacity-40 tracking-widest">App Theme</h4>
+                <div class="flex justify-around">
+                    <div id="t-midnight" onclick="setTheme('midnight')" class="w-10 h-10 rounded-xl bg-[#3b82f6] border-2 border-white/10"></div>
+                    <div id="t-sunset" onclick="setTheme('sunset')" class="w-10 h-10 rounded-xl bg-[#f97316] border-2 border-white/10"></div>
+                    <div id="t-emerald" onclick="setTheme('emerald')" class="w-10 h-10 rounded-xl bg-[#10b981] border-2 border-white/10"></div>
+                    <div id="t-purple" onclick="setTheme('purple')" class="w-10 h-10 rounded-xl bg-[#a855f7] border-2 border-white/10"></div>
+                </div>
+            </div>
+
+            <div onclick="document.getElementById('leaderModal').style.display='flex'" class="glass p-6 rounded-[2.5rem] mb-6 flex justify-between items-center cursor-pointer">
+                <div class="flex items-center gap-4 text-yellow-500 font-black uppercase text-xs"><i class="fas fa-trophy"></i><span>Leaderboard</span></div>
+                <i class="fas fa-chevron-right opacity-30"></i>
+            </div>
+
+            <button onclick="logout()" class="w-full glass p-5 rounded-[2rem] text-red-500 font-black text-xs uppercase">Sign Out</button>
+        </section>
+
+        <nav class="fixed bottom-6 left-6 right-6 glass rounded-[2.5rem] p-3 flex justify-around items-center z-[100] border border-white/10 shadow-2xl">
+            <button onclick="switchTab('home')" id="home-btn" class="active-tab flex flex-col items-center gap-1"><i class="fas fa-house"></i><span class="text-[8px] font-black uppercase tracking-widest mt-1">Home</span></button>
+            <button onclick="switchTab('wallet')" id="wallet-btn" class="text-gray-500 flex flex-col items-center gap-1"><i class="fas fa-wallet"></i><span class="text-[8px] font-black uppercase tracking-widest mt-1">Wallet</span></button>
+            <button onclick="switchTab('history')" id="history-btn" class="text-gray-500 flex flex-col items-center gap-1"><i class="fas fa-clock-rotate-left"></i><span class="text-[8px] font-black uppercase tracking-widest mt-1">Logs</span></button>
+            <button onclick="switchTab('settings')" id="settings-btn" class="text-gray-500 flex flex-col items-center gap-1"><i class="fas fa-user-circle"></i><span class="text-[8px] font-black uppercase tracking-widest mt-1">Me</span></button>
+        </nav>
+    </div>
+
+    <div id="leaderModal" class="fixed inset-0 bg-black/98 hidden flex-col z-[200] p-8 animate__animated animate__fadeIn">
+        <div class="flex justify-between items-center mb-10"><h3 class="text-2xl font-black italic">TOP WORKERS</h3><button onclick="document.getElementById('leaderModal').style.display='none'" class="w-12 h-12 glass rounded-full"><i class="fas fa-times"></i></button></div>
+        <div id="leaderList" class="flex-1 overflow-y-auto space-y-3"></div>
+    </div>
+
+    <div id="taskModal" class="fixed inset-0 bg-black/98 hidden items-center justify-center p-6 z-[200] animate__animated animate__zoomIn">
+        <div class="glass w-full max-w-sm p-10 rounded-[3.5rem] border-primary/20">
+            <h3 class="text-center font-black mb-8 text-primary uppercase tracking-widest">Task Sync</h3>
+            <div class="space-y-4 mb-8">
+                <div class="bg-black/40 p-5 rounded-[1.5rem] flex justify-between items-center border border-white/5">
+                    <div><p class="text-[8px] opacity-40 uppercase mb-1">User</p><p id="genUser" class="text-xs text-primary font-mono font-bold"></p></div>
+                    <button onclick="copyText('genUser')" class="text-white/20 hover:text-primary"><i class="fas fa-copy"></i></button>
+                </div>
+                <div class="bg-black/40 p-5 rounded-[1.5rem] flex justify-between items-center border border-white/5">
+                    <div><p class="text-[8px] opacity-40 uppercase mb-1">Pass</p><p id="genPass" class="text-xs text-primary font-mono font-bold"></p></div>
+                    <button onclick="copyText('genPass')" class="text-white/20 hover:text-primary"><i class="fas fa-copy"></i></button>
+                </div>
+            </div>
+            <textarea id="cookies" rows="4" class="w-full bg-white/5 p-5 rounded-[1.5rem] text-[10px] outline-none border border-white/5 focus:border-primary mb-6" placeholder="Paste Cookies..."></textarea>
+            <div class="flex gap-4">
+                <button onclick="document.getElementById('taskModal').style.display='none'" class="flex-1 bg-white/5 py-4 rounded-[1.5rem] font-bold text-[10px]">BACK</button>
+                <button onclick="submitTask()" class="flex-1 bg-primary py-4 rounded-[1.5rem] font-black text-[10px] shadow-lg shadow-primary/20">SUBMIT</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(t) {
+            document.querySelectorAll('.app-section').forEach(s => s.classList.add('section-hidden'));
+            document.querySelectorAll('nav button').forEach(b => { b.classList.remove('active-tab'); b.classList.add('text-gray-500'); });
+            document.getElementById(t + '-sec').classList.remove('section-hidden');
+            document.getElementById(t + '-btn').classList.add('active-tab');
+            document.getElementById(t + '-btn').classList.remove('text-gray-500');
+        }
+        window.openTask = () => {
+            document.getElementById('taskModal').style.display = 'flex';
+            document.getElementById('genUser').innerText = 'if_worker_' + Math.floor(1000 + Math.random()*9000);
+            document.getElementById('genPass').innerText = 'pass' + Math.floor(100 + Math.random()*900) + '!!';
+        };
+        window.handleAuth = (type) => {
+            const e = document.getElementById('email').value, p = document.getElementById('pass').value;
+            if(!e || !p) return showToast("Fields Required!");
+            signInWithEmailAndPassword(auth, e, p).catch(() => createUserWithEmailAndPassword(auth, e, p));
+        };
+    </script>
+</body>
+</html>
