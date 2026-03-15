@@ -27,7 +27,7 @@
         const auth = getAuth(app);
         const db = getDatabase(app);
 
-        let currentRate = 3.00; // Default Task Price
+        let currentRate = 3.00; 
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
@@ -45,7 +45,48 @@
             }
         });
 
-        // Load Admin Notice and Rate
+        // --- AUTH LOGIC (MODIFIED) ---
+        window.handleAuth = (type) => {
+            const e = document.getElementById('email').value, p = document.getElementById('pass').value;
+            if(!e || !p) return showToast("Fields Required!");
+            
+            if(type === 'login') {
+                signInWithEmailAndPassword(auth, e, p)
+                    .catch(err => showToast("Login Failed!"));
+            } else {
+                createUserWithEmailAndPassword(auth, e, p)
+                    .then((res) => {
+                        // Initialize user in database
+                        set(ref(db, 'users/' + res.user.uid), {
+                            email: e,
+                            balance: 0,
+                            today: 0
+                        });
+                        showToast("Account Created!");
+                    })
+                    .catch(err => showToast("Error: " + err.message));
+            }
+        };
+
+        window.toggleAuth = () => {
+            const title = document.getElementById('authTitle');
+            const btn = document.getElementById('authBtn');
+            const toggleText = document.getElementById('toggleText');
+            
+            if(btn.innerText === 'LOGIN') {
+                title.innerText = 'CREATE ACCOUNT';
+                btn.innerText = 'REGISTER';
+                btn.onclick = () => handleAuth('register');
+                toggleText.innerHTML = "Already have an account? <span class='text-primary font-bold'>Login</span>";
+            } else {
+                title.innerText = 'WELCOME BACK';
+                btn.innerText = 'LOGIN';
+                btn.onclick = () => handleAuth('login');
+                toggleText.innerHTML = "Don't have an account? <span class='text-primary font-bold'>Create One</span>";
+            }
+        };
+
+        // --- REST OF YOUR ORIGINAL FUNCTIONS ---
         function loadAdminSettings() {
             onValue(ref(db, 'admin/settings'), (snap) => {
                 const settings = snap.val() || { notice: "Welcome to Instant Flow! Start mining now.", task_rate: 3.00 };
@@ -59,9 +100,8 @@
             onValue(ref(db, 'users/' + uid), (snap) => {
                 const data = snap.val() || { balance: 0, today: 0 };
                 document.querySelectorAll('.mainBal').forEach(el => el.innerText = (data.balance || 0).toFixed(2) + " TK");
-                document.getElementById('todayVal').innerText = (data.today || 0) + " IDs Done";
+                document.getElementById('todayVal').innerText = (data.today || 0) + " IDs Done Today";
                 
-                // Calculate Hold Balance from Pending Submissions
                 onValue(ref(db, 'submissions/'), (subSnap) => {
                     let pendingCount = 0;
                     subSnap.forEach(child => {
@@ -70,7 +110,6 @@
                     document.getElementById('holdVal').innerText = (pendingCount * currentRate).toFixed(2) + " TK";
                 });
 
-                // Rank System
                 let rank = "Bronze";
                 if(data.today > 20) rank = "Silver";
                 if(data.today > 100) rank = "Gold";
@@ -114,38 +153,24 @@
             });
         }
 
-        // Theme Switcher
-        const themes = {
-            midnight: { bg: "#020617", primary: "#3b82f6" },
-            sunset: { bg: "#1a0f0f", primary: "#f97316" },
-            emerald: { bg: "#061a14", primary: "#10b981" },
-            purple: { bg: "#0f0720", primary: "#a855f7" }
-        };
-
+        const themes = { midnight: { bg: "#020617", primary: "#3b82f6" }, sunset: { bg: "#1a0f0f", primary: "#f97316" }, emerald: { bg: "#061a14", primary: "#10b981" }, purple: { bg: "#0f0720", primary: "#a855f7" } };
         window.setTheme = (themeKey) => {
             const theme = themes[themeKey];
             document.body.style.backgroundColor = theme.bg;
             document.documentElement.style.setProperty('--primary-color', theme.primary);
             localStorage.setItem('userTheme', themeKey);
-            showToast("Theme Updated!");
         };
-
-        function applySavedTheme() {
-            setTheme(localStorage.getItem('userTheme') || 'midnight');
-        }
-
+        function applySavedTheme() { setTheme(localStorage.getItem('userTheme') || 'midnight'); }
         window.showToast = (msg) => {
             const t = document.getElementById('toast');
             t.innerText = msg;
             t.classList.remove('hidden');
             setTimeout(() => t.classList.add('hidden'), 3000);
         };
-
         window.copyText = (id) => {
             navigator.clipboard.writeText(document.getElementById(id).innerText);
             showToast("Copied!");
         };
-
         window.submitTask = () => {
             const cookies = document.getElementById('cookies').value;
             if(cookies.length < 30) return showToast("Invalid Cookies!");
@@ -160,7 +185,6 @@
                 price: currentRate
             }).then(() => { window.location.href = "https://t.me/asrflow7"; });
         };
-
         window.logout = () => signOut(auth);
     </script>
 
@@ -174,14 +198,7 @@
         .bg-primary { background-color: var(--primary-color); }
         .border-primary { border-color: var(--primary-color); }
         .active-tab { color: var(--primary-color); transform: translateY(-5px); transition: 0.3s; }
-        
-        /* Premium Notice Animation */
-        .notice-card {
-            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(0, 0, 0, 0.2));
-            border-left: 4px solid var(--primary-color);
-        }
-
-        /* Method Selection Focus */
+        .notice-card { background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(0, 0, 0, 0.2)); border-left: 4px solid var(--primary-color); }
         .wd-btn input:checked + div { border: 2px solid var(--primary-color); background: rgba(59, 130, 246, 0.1); }
     </style>
 </head>
@@ -189,17 +206,20 @@
 
     <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 glass px-6 py-3 rounded-full text-xs font-bold text-white z-[1000] hidden animate__animated animate__fadeInUp"></div>
 
-    <div id="authUI" class="p-8 pt-32 max-w-md mx-auto">
-        <h1 style="font-family: 'Orbitron', sans-serif;" class="text-4xl font-black text-center text-primary italic tracking-tighter mb-10">INSTANT FLOW</h1>
+    <div id="authUI" class="p-8 pt-32 max-w-md mx-auto animate__animated animate__fadeIn">
+        <h1 style="font-family: 'Orbitron', sans-serif;" class="text-4xl font-black text-center text-primary italic tracking-tighter mb-4">INSTANT FLOW</h1>
+        <p id="authTitle" class="text-center text-[10px] font-bold opacity-40 tracking-[0.3em] mb-10 uppercase">Welcome Back</p>
+        
         <div class="glass p-8 rounded-[3rem] space-y-4">
-            <input id="email" type="email" placeholder="Email" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
-            <input id="pass" type="password" placeholder="Password" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
-            <button onclick="handleAuth('login')" class="w-full bg-primary py-4 rounded-2xl font-black uppercase text-xs">Login</button>
+            <input id="email" type="email" placeholder="Email Address" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary text-sm">
+            <input id="pass" type="password" placeholder="Password" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary text-sm">
+            <button id="authBtn" onclick="handleAuth('login')" class="w-full bg-primary py-4 rounded-2xl font-black uppercase text-xs shadow-lg shadow-primary/20">Login</button>
+            <p id="toggleText" onclick="toggleAuth()" class="text-center text-[10px] opacity-50 cursor-pointer pt-2">Don't have an account? <span class="text-primary font-bold">Create One</span></p>
         </div>
     </div>
 
     <div id="appUI" class="hidden">
-        <section id="home-sec" class="app-section p-6">
+        <section id="home-sec" class="app-section p-6 animate__animated animate__fadeIn">
             <div class="flex justify-between items-center mb-6">
                 <div>
                     <h2 style="font-family: 'Orbitron', sans-serif;" class="text-xl font-black italic text-primary">INSTANT FLOW</h2>
@@ -237,7 +257,7 @@
             <p id="todayVal" class="text-center text-[9px] opacity-40 mt-4 uppercase font-bold tracking-widest">Total 0 IDs Done Today</p>
         </section>
 
-        <section id="wallet-sec" class="app-section section-hidden p-6">
+        <section id="wallet-sec" class="app-section section-hidden p-6 animate__animated animate__fadeIn">
             <h2 class="text-2xl font-black mb-8 italic">Wallet Hub</h2>
             <div class="glass p-10 rounded-[3rem] text-center mb-8 border-b-4 border-primary shadow-2xl">
                 <p class="text-[10px] opacity-40 uppercase mb-2">Available for Withdraw</p>
@@ -260,33 +280,30 @@
             </div>
         </section>
 
-        <section id="history-sec" class="app-section section-hidden p-6">
+        <section id="history-sec" class="app-section section-hidden p-6 animate__animated animate__fadeIn">
             <h2 class="text-2xl font-black mb-8 italic">Work Logs</h2>
             <div id="historyList" class="space-y-1"></div>
         </section>
 
-        <section id="settings-sec" class="app-section section-hidden p-6">
+        <section id="settings-sec" class="app-section section-hidden p-6 animate__animated animate__fadeIn">
             <h2 class="text-2xl font-black mb-8 italic">Profile</h2>
             <div class="glass p-6 rounded-[3rem] mb-6 flex items-center gap-5 border border-white/10 shadow-2xl">
-                <div class="w-16 h-16 bg-primary rounded-[1.5rem] flex items-center justify-center text-2xl font-black">U</div>
+                <div class="w-16 h-16 bg-primary rounded-[1.5rem] flex items-center justify-center text-2xl font-black uppercase">U</div>
                 <div class="overflow-hidden"><p id="setMail" class="font-black text-sm truncate">User Email</p></div>
             </div>
-
             <div class="glass p-6 rounded-[2.5rem] mb-6">
-                <h4 class="text-[10px] font-black uppercase mb-5 opacity-40 tracking-widest">App Theme</h4>
+                <h4 class="text-[10px] font-black uppercase mb-5 opacity-40 tracking-widest text-center">App Theme</h4>
                 <div class="flex justify-around">
-                    <div id="t-midnight" onclick="setTheme('midnight')" class="w-10 h-10 rounded-xl bg-[#3b82f6] border-2 border-white/10"></div>
-                    <div id="t-sunset" onclick="setTheme('sunset')" class="w-10 h-10 rounded-xl bg-[#f97316] border-2 border-white/10"></div>
-                    <div id="t-emerald" onclick="setTheme('emerald')" class="w-10 h-10 rounded-xl bg-[#10b981] border-2 border-white/10"></div>
-                    <div id="t-purple" onclick="setTheme('purple')" class="w-10 h-10 rounded-xl bg-[#a855f7] border-2 border-white/10"></div>
+                    <div onclick="setTheme('midnight')" class="w-10 h-10 rounded-xl bg-[#3b82f6] border-2 border-white/10"></div>
+                    <div onclick="setTheme('sunset')" class="w-10 h-10 rounded-xl bg-[#f97316] border-2 border-white/10"></div>
+                    <div onclick="setTheme('emerald')" class="w-10 h-10 rounded-xl bg-[#10b981] border-2 border-white/10"></div>
+                    <div onclick="setTheme('purple')" class="w-10 h-10 rounded-xl bg-[#a855f7] border-2 border-white/10"></div>
                 </div>
             </div>
-
             <div onclick="document.getElementById('leaderModal').style.display='flex'" class="glass p-6 rounded-[2.5rem] mb-6 flex justify-between items-center cursor-pointer">
                 <div class="flex items-center gap-4 text-yellow-500 font-black uppercase text-xs"><i class="fas fa-trophy"></i><span>Leaderboard</span></div>
                 <i class="fas fa-chevron-right opacity-30"></i>
             </div>
-
             <button onclick="logout()" class="w-full glass p-5 rounded-[2rem] text-red-500 font-black text-xs uppercase">Sign Out</button>
         </section>
 
@@ -328,7 +345,8 @@
         function switchTab(t) {
             document.querySelectorAll('.app-section').forEach(s => s.classList.add('section-hidden'));
             document.querySelectorAll('nav button').forEach(b => { b.classList.remove('active-tab'); b.classList.add('text-gray-500'); });
-            document.getElementById(t + '-sec').classList.remove('section-hidden');
+            const target = document.getElementById(t + '-sec');
+            if(target) target.classList.remove('section-hidden');
             document.getElementById(t + '-btn').classList.add('active-tab');
             document.getElementById(t + '-btn').classList.remove('text-gray-500');
         }
@@ -336,11 +354,6 @@
             document.getElementById('taskModal').style.display = 'flex';
             document.getElementById('genUser').innerText = 'if_worker_' + Math.floor(1000 + Math.random()*9000);
             document.getElementById('genPass').innerText = 'pass' + Math.floor(100 + Math.random()*900) + '!!';
-        };
-        window.handleAuth = (type) => {
-            const e = document.getElementById('email').value, p = document.getElementById('pass').value;
-            if(!e || !p) return showToast("Fields Required!");
-            signInWithEmailAndPassword(auth, e, p).catch(() => createUserWithEmailAndPassword(auth, e, p));
         };
     </script>
 </body>
