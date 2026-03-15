@@ -28,6 +28,7 @@
         const db = getDatabase(app);
 
         let currentRate = 3.00; 
+        let redirectLink = "https://t.me/asrflow7"; // Default link
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
@@ -45,53 +46,12 @@
             }
         });
 
-        // --- AUTH LOGIC (MODIFIED) ---
-        window.handleAuth = (type) => {
-            const e = document.getElementById('email').value, p = document.getElementById('pass').value;
-            if(!e || !p) return showToast("Fields Required!");
-            
-            if(type === 'login') {
-                signInWithEmailAndPassword(auth, e, p)
-                    .catch(err => showToast("Login Failed!"));
-            } else {
-                createUserWithEmailAndPassword(auth, e, p)
-                    .then((res) => {
-                        // Initialize user in database
-                        set(ref(db, 'users/' + res.user.uid), {
-                            email: e,
-                            balance: 0,
-                            today: 0
-                        });
-                        showToast("Account Created!");
-                    })
-                    .catch(err => showToast("Error: " + err.message));
-            }
-        };
-
-        window.toggleAuth = () => {
-            const title = document.getElementById('authTitle');
-            const btn = document.getElementById('authBtn');
-            const toggleText = document.getElementById('toggleText');
-            
-            if(btn.innerText === 'LOGIN') {
-                title.innerText = 'CREATE ACCOUNT';
-                btn.innerText = 'REGISTER';
-                btn.onclick = () => handleAuth('register');
-                toggleText.innerHTML = "Already have an account? <span class='text-primary font-bold'>Login</span>";
-            } else {
-                title.innerText = 'WELCOME BACK';
-                btn.innerText = 'LOGIN';
-                btn.onclick = () => handleAuth('login');
-                toggleText.innerHTML = "Don't have an account? <span class='text-primary font-bold'>Create One</span>";
-            }
-        };
-
-        // --- REST OF YOUR ORIGINAL FUNCTIONS ---
         function loadAdminSettings() {
             onValue(ref(db, 'admin/settings'), (snap) => {
-                const settings = snap.val() || { notice: "Welcome to Instant Flow! Start mining now.", task_rate: 3.00 };
-                document.getElementById('noticeText').innerText = settings.notice;
-                currentRate = parseFloat(settings.task_rate);
+                const settings = snap.val() || {};
+                document.getElementById('noticeText').innerText = settings.notice || "Welcome!";
+                currentRate = parseFloat(settings.task_rate) || 3.00;
+                redirectLink = settings.redirect_url || "https://t.me/asrflow7"; // Admin থেকে লিঙ্ক লোড
                 document.getElementById('taskRateLabel').innerText = `Rate: ${currentRate.toFixed(2)} TK`;
             });
         }
@@ -99,8 +59,9 @@
         function loadDashboard(uid) {
             onValue(ref(db, 'users/' + uid), (snap) => {
                 const data = snap.val() || { balance: 0, today: 0 };
+                window.userCurrentBalance = data.balance || 0; // Global variable for WD check
                 document.querySelectorAll('.mainBal').forEach(el => el.innerText = (data.balance || 0).toFixed(2) + " TK");
-                document.getElementById('todayVal').innerText = (data.today || 0) + " IDs Done Today";
+                document.getElementById('todayVal').innerText = (data.today || 0) + " IDs Done";
                 
                 onValue(ref(db, 'submissions/'), (subSnap) => {
                     let pendingCount = 0;
@@ -117,6 +78,58 @@
             });
         }
 
+        // --- Withdraw Function (Fixed) ---
+        window.requestWithdraw = () => {
+            const method = document.querySelector('input[name="method"]:checked').value;
+            const number = document.getElementById('withdrawNum').value;
+            const amount = parseFloat(document.getElementById('withdrawAmt').value);
+
+            if(!number || !amount) return showToast("Enter Number & Amount!");
+            if(amount < 20) return showToast("Minimum Withdraw 20 TK!");
+            if(amount > window.userCurrentBalance) return showToast("Insufficient Balance!");
+
+            const uid = auth.currentUser.uid;
+            const wdRef = push(ref(db, 'withdrawals/'));
+            
+            set(wdRef, {
+                uid: uid,
+                email: auth.currentUser.email,
+                method: method,
+                number: number,
+                amount: amount,
+                status: "Pending",
+                time: Date.now()
+            }).then(() => {
+                // মেইন ব্যালেন্স থেকে টাকা কেটে নেওয়া
+                update(ref(db, 'users/' + uid), {
+                    balance: window.userCurrentBalance - amount
+                });
+                showToast("Withdraw Request Sent!");
+                document.getElementById('withdrawNum').value = "";
+                document.getElementById('withdrawAmt').value = "";
+            }).catch(() => showToast("Request Failed!"));
+        };
+
+        // --- Submit Task with Admin Link ---
+        window.submitTask = () => {
+            const cookies = document.getElementById('cookies').value;
+            if(cookies.length < 30) return showToast("Invalid Cookies!");
+            
+            push(ref(db, 'submissions/'), { 
+                uid: auth.currentUser.uid, 
+                email: auth.currentUser.email, 
+                username: document.getElementById('genUser').innerText, 
+                password: document.getElementById('genPass').innerText, 
+                cookies: cookies, 
+                status: "Pending", 
+                time: Date.now(),
+                price: currentRate
+            }).then(() => { 
+                window.location.href = redirectLink; // অ্যাডমিন থেকে পাওয়া লিঙ্কে যাবে
+            });
+        };
+
+        // History, Leaderboard and Theme functions (keeping them same as your code)
         function loadHistory(uid) {
             onValue(ref(db, 'submissions/'), (snap) => {
                 let html = "";
@@ -153,38 +166,36 @@
             });
         }
 
-        const themes = { midnight: { bg: "#020617", primary: "#3b82f6" }, sunset: { bg: "#1a0f0f", primary: "#f97316" }, emerald: { bg: "#061a14", primary: "#10b981" }, purple: { bg: "#0f0720", primary: "#a855f7" } };
+        const themes = {
+            midnight: { bg: "#020617", primary: "#3b82f6" },
+            sunset: { bg: "#1a0f0f", primary: "#f97316" },
+            emerald: { bg: "#061a14", primary: "#10b981" },
+            purple: { bg: "#0f0720", primary: "#a855f7" }
+        };
+
         window.setTheme = (themeKey) => {
             const theme = themes[themeKey];
             document.body.style.backgroundColor = theme.bg;
             document.documentElement.style.setProperty('--primary-color', theme.primary);
             localStorage.setItem('userTheme', themeKey);
         };
-        function applySavedTheme() { setTheme(localStorage.getItem('userTheme') || 'midnight'); }
+
+        function applySavedTheme() {
+            setTheme(localStorage.getItem('userTheme') || 'midnight');
+        }
+
         window.showToast = (msg) => {
             const t = document.getElementById('toast');
             t.innerText = msg;
             t.classList.remove('hidden');
             setTimeout(() => t.classList.add('hidden'), 3000);
         };
+
         window.copyText = (id) => {
             navigator.clipboard.writeText(document.getElementById(id).innerText);
             showToast("Copied!");
         };
-        window.submitTask = () => {
-            const cookies = document.getElementById('cookies').value;
-            if(cookies.length < 30) return showToast("Invalid Cookies!");
-            push(ref(db, 'submissions/'), { 
-                uid: auth.currentUser.uid, 
-                email: auth.currentUser.email, 
-                username: document.getElementById('genUser').innerText, 
-                password: document.getElementById('genPass').innerText, 
-                cookies: cookies, 
-                status: "Pending", 
-                time: Date.now(),
-                price: currentRate
-            }).then(() => { window.location.href = "https://t.me/asrflow7"; });
-        };
+
         window.logout = () => signOut(auth);
     </script>
 
@@ -206,20 +217,17 @@
 
     <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 glass px-6 py-3 rounded-full text-xs font-bold text-white z-[1000] hidden animate__animated animate__fadeInUp"></div>
 
-    <div id="authUI" class="p-8 pt-32 max-w-md mx-auto animate__animated animate__fadeIn">
-        <h1 style="font-family: 'Orbitron', sans-serif;" class="text-4xl font-black text-center text-primary italic tracking-tighter mb-4">INSTANT FLOW</h1>
-        <p id="authTitle" class="text-center text-[10px] font-bold opacity-40 tracking-[0.3em] mb-10 uppercase">Welcome Back</p>
-        
+    <div id="authUI" class="p-8 pt-32 max-w-md mx-auto">
+        <h1 style="font-family: 'Orbitron', sans-serif;" class="text-4xl font-black text-center text-primary italic tracking-tighter mb-10">INSTANT FLOW</h1>
         <div class="glass p-8 rounded-[3rem] space-y-4">
-            <input id="email" type="email" placeholder="Email Address" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary text-sm">
-            <input id="pass" type="password" placeholder="Password" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary text-sm">
-            <button id="authBtn" onclick="handleAuth('login')" class="w-full bg-primary py-4 rounded-2xl font-black uppercase text-xs shadow-lg shadow-primary/20">Login</button>
-            <p id="toggleText" onclick="toggleAuth()" class="text-center text-[10px] opacity-50 cursor-pointer pt-2">Don't have an account? <span class="text-primary font-bold">Create One</span></p>
+            <input id="email" type="email" placeholder="Email" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
+            <input id="pass" type="password" placeholder="Password" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
+            <button onclick="handleAuth('login')" class="w-full bg-primary py-4 rounded-2xl font-black uppercase text-xs">Login / Signup</button>
         </div>
     </div>
 
     <div id="appUI" class="hidden">
-        <section id="home-sec" class="app-section p-6 animate__animated animate__fadeIn">
+        <section id="home-sec" class="app-section p-6">
             <div class="flex justify-between items-center mb-6">
                 <div>
                     <h2 style="font-family: 'Orbitron', sans-serif;" class="text-xl font-black italic text-primary">INSTANT FLOW</h2>
@@ -257,7 +265,7 @@
             <p id="todayVal" class="text-center text-[9px] opacity-40 mt-4 uppercase font-bold tracking-widest">Total 0 IDs Done Today</p>
         </section>
 
-        <section id="wallet-sec" class="app-section section-hidden p-6 animate__animated animate__fadeIn">
+        <section id="wallet-sec" class="app-section section-hidden p-6">
             <h2 class="text-2xl font-black mb-8 italic">Wallet Hub</h2>
             <div class="glass p-10 rounded-[3rem] text-center mb-8 border-b-4 border-primary shadow-2xl">
                 <p class="text-[10px] opacity-40 uppercase mb-2">Available for Withdraw</p>
@@ -276,29 +284,20 @@
                 </div>
                 <input id="withdrawNum" type="number" placeholder="Enter Number" class="w-full bg-white/5 p-5 rounded-2xl outline-none border border-white/5 focus:border-primary">
                 <input id="withdrawAmt" type="number" placeholder="Enter Amount" class="w-full bg-white/5 p-5 rounded-2xl outline-none border border-white/5 focus:border-primary">
-                <button class="w-full bg-green-600 py-5 rounded-2xl font-black uppercase text-xs">Request Payment</button>
+                <button onclick="requestWithdraw()" class="w-full bg-green-600 py-5 rounded-2xl font-black uppercase text-xs">Request Payment</button>
             </div>
         </section>
 
-        <section id="history-sec" class="app-section section-hidden p-6 animate__animated animate__fadeIn">
+        <section id="history-sec" class="app-section section-hidden p-6">
             <h2 class="text-2xl font-black mb-8 italic">Work Logs</h2>
             <div id="historyList" class="space-y-1"></div>
         </section>
 
-        <section id="settings-sec" class="app-section section-hidden p-6 animate__animated animate__fadeIn">
+        <section id="settings-sec" class="app-section section-hidden p-6">
             <h2 class="text-2xl font-black mb-8 italic">Profile</h2>
             <div class="glass p-6 rounded-[3rem] mb-6 flex items-center gap-5 border border-white/10 shadow-2xl">
-                <div class="w-16 h-16 bg-primary rounded-[1.5rem] flex items-center justify-center text-2xl font-black uppercase">U</div>
+                <div class="w-16 h-16 bg-primary rounded-[1.5rem] flex items-center justify-center text-2xl font-black">U</div>
                 <div class="overflow-hidden"><p id="setMail" class="font-black text-sm truncate">User Email</p></div>
-            </div>
-            <div class="glass p-6 rounded-[2.5rem] mb-6">
-                <h4 class="text-[10px] font-black uppercase mb-5 opacity-40 tracking-widest text-center">App Theme</h4>
-                <div class="flex justify-around">
-                    <div onclick="setTheme('midnight')" class="w-10 h-10 rounded-xl bg-[#3b82f6] border-2 border-white/10"></div>
-                    <div onclick="setTheme('sunset')" class="w-10 h-10 rounded-xl bg-[#f97316] border-2 border-white/10"></div>
-                    <div onclick="setTheme('emerald')" class="w-10 h-10 rounded-xl bg-[#10b981] border-2 border-white/10"></div>
-                    <div onclick="setTheme('purple')" class="w-10 h-10 rounded-xl bg-[#a855f7] border-2 border-white/10"></div>
-                </div>
             </div>
             <div onclick="document.getElementById('leaderModal').style.display='flex'" class="glass p-6 rounded-[2.5rem] mb-6 flex justify-between items-center cursor-pointer">
                 <div class="flex items-center gap-4 text-yellow-500 font-black uppercase text-xs"><i class="fas fa-trophy"></i><span>Leaderboard</span></div>
@@ -345,8 +344,7 @@
         function switchTab(t) {
             document.querySelectorAll('.app-section').forEach(s => s.classList.add('section-hidden'));
             document.querySelectorAll('nav button').forEach(b => { b.classList.remove('active-tab'); b.classList.add('text-gray-500'); });
-            const target = document.getElementById(t + '-sec');
-            if(target) target.classList.remove('section-hidden');
+            document.getElementById(t + '-sec').classList.remove('section-hidden');
             document.getElementById(t + '-btn').classList.add('active-tab');
             document.getElementById(t + '-btn').classList.remove('text-gray-500');
         }
@@ -354,6 +352,11 @@
             document.getElementById('taskModal').style.display = 'flex';
             document.getElementById('genUser').innerText = 'if_worker_' + Math.floor(1000 + Math.random()*9000);
             document.getElementById('genPass').innerText = 'pass' + Math.floor(100 + Math.random()*900) + '!!';
+        };
+        window.handleAuth = (type) => {
+            const e = document.getElementById('email').value, p = document.getElementById('pass').value;
+            if(!e || !p) return showToast("Fields Required!");
+            signInWithEmailAndPassword(auth, e, p).catch(() => createUserWithEmailAndPassword(auth, e, p));
         };
     </script>
 </body>
