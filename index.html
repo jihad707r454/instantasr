@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
@@ -28,7 +29,7 @@
         const db = getDatabase(app);
 
         let currentRate = 3.00; 
-        let redirectLink = "https://t.me/asrflow7"; // Default link
+        let redirectLink = "https://t.me/asrflow7"; 
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
@@ -51,7 +52,7 @@
                 const settings = snap.val() || {};
                 document.getElementById('noticeText').innerText = settings.notice || "Welcome!";
                 currentRate = parseFloat(settings.task_rate) || 3.00;
-                redirectLink = settings.redirect_url || "https://t.me/asrflow7"; // Admin থেকে লিঙ্ক লোড
+                redirectLink = settings.redirect_url || "https://t.me/asrflow7"; 
                 document.getElementById('taskRateLabel').innerText = `Rate: ${currentRate.toFixed(2)} TK`;
             });
         }
@@ -59,7 +60,7 @@
         function loadDashboard(uid) {
             onValue(ref(db, 'users/' + uid), (snap) => {
                 const data = snap.val() || { balance: 0, today: 0 };
-                window.userCurrentBalance = data.balance || 0; // Global variable for WD check
+                window.userCurrentBalance = data.balance || 0; 
                 document.querySelectorAll('.mainBal').forEach(el => el.innerText = (data.balance || 0).toFixed(2) + " TK");
                 document.getElementById('todayVal').innerText = (data.today || 0) + " IDs Done";
                 
@@ -78,7 +79,6 @@
             });
         }
 
-        // --- Withdraw Function (Fixed) ---
         window.requestWithdraw = () => {
             const method = document.querySelector('input[name="method"]:checked').value;
             const number = document.getElementById('withdrawNum').value;
@@ -100,17 +100,14 @@
                 status: "Pending",
                 time: Date.now()
             }).then(() => {
-                // মেইন ব্যালেন্স থেকে টাকা কেটে নেওয়া
-                update(ref(db, 'users/' + uid), {
-                    balance: window.userCurrentBalance - amount
-                });
+                update(ref(db, 'users/' + uid), { balance: window.userCurrentBalance - amount });
+                confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#10b981', '#3b82f6', '#fbbf24'] });
                 showToast("Withdraw Request Sent!");
                 document.getElementById('withdrawNum').value = "";
                 document.getElementById('withdrawAmt').value = "";
             }).catch(() => showToast("Request Failed!"));
         };
 
-        // --- Submit Task with Admin Link ---
         window.submitTask = () => {
             const cookies = document.getElementById('cookies').value;
             if(cookies.length < 30) return showToast("Invalid Cookies!");
@@ -125,11 +122,11 @@
                 time: Date.now(),
                 price: currentRate
             }).then(() => { 
-                window.location.href = redirectLink; // অ্যাডমিন থেকে পাওয়া লিঙ্কে যাবে
+                confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+                setTimeout(() => { window.location.href = redirectLink; }, 1200);
             });
         };
 
-        // History, Leaderboard and Theme functions (keeping them same as your code)
         function loadHistory(uid) {
             onValue(ref(db, 'submissions/'), (snap) => {
                 let html = "";
@@ -147,42 +144,71 @@
             });
         }
 
+        // --- UPDATED LEADERBOARD LOGIC ---
         function loadLeaderboard(myUid) {
             const usersRef = query(ref(db, 'users'), orderByChild('today'));
             onValue(usersRef, (snap) => {
                 let list = [];
-                snap.forEach(u => { if(u.val().email) list.push({ uid: u.key, name: u.val().email.split('@')[0], count: u.val().today || 0 }); });
+                snap.forEach(u => { 
+                    if(u.val().email) {
+                        list.push({ 
+                            uid: u.key, 
+                            name: u.val().email.split('@')[0], 
+                            count: u.val().today || 0,
+                            isVerified: u.val().verified || false
+                        }); 
+                    }
+                });
+                
                 list.sort((a,b) => b.count - a.count);
+                
                 let html = "";
                 list.forEach((u, i) => {
-                    if(i < 10) {
-                        html += `<div class="flex justify-between items-center p-4 ${u.uid === myUid ? 'bg-primary/20 border-primary' : 'bg-black/20'} rounded-2xl mb-2 border border-white/5">
-                            <span class="text-xs font-bold">${i+1}. ${u.name}</span>
-                            <span class="text-xs font-black text-primary">${u.count} IDs</span>
+                    if(i < 50) { // Top 50 Users
+                        const isMe = u.uid === myUid;
+                        const badgeHtml = u.isVerified ? '<i class="fas fa-check-circle text-blue-500 ml-1 scale-75 animate-pulse"></i>' : '';
+                        
+                        // Special design for current user and top 3
+                        let borderStyle = isMe ? 'border-primary shadow-[0_0_15px_rgba(var(--primary-rgb),0.3)]' : 'border-white/5';
+                        let rankColor = i === 0 ? 'text-yellow-400' : (i === 1 ? 'text-slate-300' : (i === 2 ? 'text-orange-400' : 'text-white/40'));
+                        
+                        html += `
+                        <div class="flex justify-between items-center p-4 rounded-2xl mb-2 border glass transition-all duration-500 ${borderStyle} ${isMe ? 'bg-primary/10' : ''}">
+                            <div class="flex items-center gap-3">
+                                <span class="text-[10px] font-black w-5 ${rankColor}">${i+1}</span>
+                                <div class="relative">
+                                    <span class="text-xs font-bold tracking-tight">${u.name}${badgeHtml}</span>
+                                    ${isMe ? '<span class="absolute -top-4 left-0 text-[7px] font-black text-primary uppercase tracking-widest">You</span>' : ''}
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-[10px] font-black text-primary block">${u.count} IDs</span>
+                                <span class="text-[7px] opacity-30 uppercase font-bold tracking-tighter">Completed</span>
+                            </div>
                         </div>`;
                     }
                 });
-                document.getElementById('leaderList').innerHTML = html;
+                document.getElementById('leaderList').innerHTML = html || "<p class='text-xs opacity-30 text-center py-10'>No Users Found</p>";
             });
         }
 
         const themes = {
-            midnight: { bg: "#020617", primary: "#3b82f6" },
-            sunset: { bg: "#1a0f0f", primary: "#f97316" },
-            emerald: { bg: "#061a14", primary: "#10b981" },
-            purple: { bg: "#0f0720", primary: "#a855f7" }
+            midnight: { bg: "#020617", primary: "#3b82f6", rgb: "59, 130, 246" },
+            sunset: { bg: "#1a0f0f", primary: "#f97316", rgb: "249, 115, 22" },
+            emerald: { bg: "#061a14", primary: "#10b981", rgb: "16, 185, 129" },
+            purple: { bg: "#0f0720", primary: "#a855f7", rgb: "168, 85, 247" }
         };
 
         window.setTheme = (themeKey) => {
             const theme = themes[themeKey];
             document.body.style.backgroundColor = theme.bg;
             document.documentElement.style.setProperty('--primary-color', theme.primary);
+            document.documentElement.style.setProperty('--primary-rgb', theme.rgb);
             localStorage.setItem('userTheme', themeKey);
+            document.getElementById('themeModal').style.display = 'none';
         };
 
-        function applySavedTheme() {
-            setTheme(localStorage.getItem('userTheme') || 'midnight');
-        }
+        function applySavedTheme() { setTheme(localStorage.getItem('userTheme') || 'midnight'); }
 
         window.showToast = (msg) => {
             const t = document.getElementById('toast');
@@ -196,11 +222,21 @@
             showToast("Copied!");
         };
 
+        window.handleAuth = () => {
+            const e = document.getElementById('email').value, p = document.getElementById('pass').value;
+            if(!e || !p) return showToast("Fields Required!");
+            signInWithEmailAndPassword(auth, e, p).catch(() => {
+                createUserWithEmailAndPassword(auth, e, p).then((u) => {
+                    set(ref(db, 'users/' + u.user.uid), { email: e, balance: 0, today: 0 });
+                });
+            });
+        };
+
         window.logout = () => signOut(auth);
     </script>
 
     <style>
-        :root { --primary-color: #3b82f6; }
+        :root { --primary-color: #3b82f6; --primary-rgb: 59, 130, 246; }
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
         body { background: #020617; color: white; font-family: 'Plus Jakarta Sans', sans-serif; transition: 0.5s; overflow-x: hidden; }
         .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
@@ -211,22 +247,37 @@
         .active-tab { color: var(--primary-color); transform: translateY(-5px); transition: 0.3s; }
         .notice-card { background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(0, 0, 0, 0.2)); border-left: 4px solid var(--primary-color); }
         .wd-btn input:checked + div { border: 2px solid var(--primary-color); background: rgba(59, 130, 246, 0.1); }
+        
+        /* Smooth Scrolling */
+        #leaderList::-webkit-scrollbar { width: 4px; }
+        #leaderList::-webkit-scrollbar-thumb { background: var(--primary-color); border-radius: 10px; opacity: 0.2; }
+        
+        .ambient-orb { position: fixed; border-radius: 50%; filter: blur(90px); z-index: -1; opacity: 0.3; animation: floatOrb 10s infinite alternate ease-in-out; pointer-events: none; }
+        .orb-1 { top: -10%; left: -10%; width: 300px; height: 300px; background: var(--primary-color); }
+        .orb-2 { bottom: -10%; right: -10%; width: 400px; height: 400px; background: #a855f7; animation-delay: -5s; }
+        @keyframes floatOrb { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(30px, 50px) scale(1.2); } }
+        .magic-border { position: relative; z-index: 1; }
+        .magic-border::before { content: ""; position: absolute; inset: -2px; border-radius: 3.2rem; background: linear-gradient(90deg, var(--primary-color), #a855f7, var(--primary-color)); background-size: 200%; z-index: -1; animation: magicGlow 3s linear infinite; opacity: 0.6; }
+        @keyframes magicGlow { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
     </style>
 </head>
-<body class="pb-28">
+<body class="pb-28 relative">
+
+    <div class="ambient-orb orb-1"></div>
+    <div class="ambient-orb orb-2"></div>
 
     <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 glass px-6 py-3 rounded-full text-xs font-bold text-white z-[1000] hidden animate__animated animate__fadeInUp"></div>
 
-    <div id="authUI" class="p-8 pt-32 max-w-md mx-auto">
+    <div id="authUI" class="p-8 pt-32 max-w-md mx-auto relative z-10">
         <h1 style="font-family: 'Orbitron', sans-serif;" class="text-4xl font-black text-center text-primary italic tracking-tighter mb-10">INSTANT FLOW</h1>
         <div class="glass p-8 rounded-[3rem] space-y-4">
             <input id="email" type="email" placeholder="Email" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
             <input id="pass" type="password" placeholder="Password" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
-            <button onclick="handleAuth('login')" class="w-full bg-primary py-4 rounded-2xl font-black uppercase text-xs">Login / Signup</button>
+            <button onclick="handleAuth()" class="w-full bg-primary py-4 rounded-2xl font-black uppercase text-xs">Login / Signup</button>
         </div>
     </div>
 
-    <div id="appUI" class="hidden">
+    <div id="appUI" class="hidden relative z-10">
         <section id="home-sec" class="app-section p-6">
             <div class="flex justify-between items-center mb-6">
                 <div>
@@ -255,11 +306,8 @@
                 </div>
             </div>
 
-            <div class="glass p-6 rounded-[3rem] flex justify-between items-center border border-white/10">
-                <div>
-                    <h4 class="font-black text-sm uppercase">Instagram Task</h4>
-                    <p id="taskRateLabel" class="text-[10px] text-primary font-bold mt-1">Rate: 3.00 TK</p>
-                </div>
+            <div class="glass p-6 rounded-[3rem] flex justify-between items-center border border-white/10 magic-border">
+                <div><h4 class="font-black text-sm uppercase">Instagram Task</h4><p id="taskRateLabel" class="text-[10px] text-primary font-bold mt-1">Rate: 3.00 TK</p></div>
                 <button onclick="openTask()" class="bg-primary px-10 py-4 rounded-2xl font-black text-xs shadow-lg shadow-primary/40">START</button>
             </div>
             <p id="todayVal" class="text-center text-[9px] opacity-40 mt-4 uppercase font-bold tracking-widest">Total 0 IDs Done Today</p>
@@ -273,14 +321,8 @@
             </div>
             <div class="space-y-4">
                 <div class="flex gap-4">
-                    <label class="wd-btn flex-1 cursor-pointer">
-                        <input type="radio" name="method" value="Bkash" class="hidden" checked>
-                        <div class="glass p-5 rounded-2xl text-center text-xs font-black border border-white/5 uppercase">BKASH</div>
-                    </label>
-                    <label class="wd-btn flex-1 cursor-pointer">
-                        <input type="radio" name="method" value="Nagad" class="hidden">
-                        <div class="glass p-5 rounded-2xl text-center text-xs font-black border border-white/5 uppercase">NAGAD</div>
-                    </label>
+                    <label class="wd-btn flex-1 cursor-pointer"><input type="radio" name="method" value="Bkash" class="hidden" checked><div class="glass p-5 rounded-2xl text-center text-xs font-black border border-white/5 uppercase">BKASH</div></label>
+                    <label class="wd-btn flex-1 cursor-pointer"><input type="radio" name="method" value="Nagad" class="hidden"><div class="glass p-5 rounded-2xl text-center text-xs font-black border border-white/5 uppercase">NAGAD</div></label>
                 </div>
                 <input id="withdrawNum" type="number" placeholder="Enter Number" class="w-full bg-white/5 p-5 rounded-2xl outline-none border border-white/5 focus:border-primary">
                 <input id="withdrawAmt" type="number" placeholder="Enter Amount" class="w-full bg-white/5 p-5 rounded-2xl outline-none border border-white/5 focus:border-primary">
@@ -299,11 +341,15 @@
                 <div class="w-16 h-16 bg-primary rounded-[1.5rem] flex items-center justify-center text-2xl font-black">U</div>
                 <div class="overflow-hidden"><p id="setMail" class="font-black text-sm truncate">User Email</p></div>
             </div>
-            <div onclick="document.getElementById('leaderModal').style.display='flex'" class="glass p-6 rounded-[2.5rem] mb-6 flex justify-between items-center cursor-pointer">
+            <div onclick="document.getElementById('themeModal').style.display='flex'" class="glass p-6 rounded-[2.5rem] mb-4 flex justify-between items-center cursor-pointer border border-white/5 shadow-xl">
+                <div class="flex items-center gap-4 text-primary font-black uppercase text-xs"><i class="fas fa-palette"></i><span>App Appearance</span></div>
+                <i class="fas fa-chevron-right opacity-30"></i>
+            </div>
+            <div onclick="document.getElementById('leaderModal').style.display='flex'" class="glass p-6 rounded-[2.5rem] mb-6 flex justify-between items-center cursor-pointer border border-white/5 shadow-xl">
                 <div class="flex items-center gap-4 text-yellow-500 font-black uppercase text-xs"><i class="fas fa-trophy"></i><span>Leaderboard</span></div>
                 <i class="fas fa-chevron-right opacity-30"></i>
             </div>
-            <button onclick="logout()" class="w-full glass p-5 rounded-[2rem] text-red-500 font-black text-xs uppercase">Sign Out</button>
+            <button onclick="logout()" class="w-full glass p-5 rounded-[2rem] text-red-500 font-black text-xs uppercase shadow-xl">Sign Out</button>
         </section>
 
         <nav class="fixed bottom-6 left-6 right-6 glass rounded-[2.5rem] p-3 flex justify-around items-center z-[100] border border-white/10 shadow-2xl">
@@ -314,29 +360,43 @@
         </nav>
     </div>
 
-    <div id="leaderModal" class="fixed inset-0 bg-black/98 hidden flex-col z-[200] p-8 animate__animated animate__fadeIn">
-        <div class="flex justify-between items-center mb-10"><h3 class="text-2xl font-black italic">TOP WORKERS</h3><button onclick="document.getElementById('leaderModal').style.display='none'" class="w-12 h-12 glass rounded-full"><i class="fas fa-times"></i></button></div>
-        <div id="leaderList" class="flex-1 overflow-y-auto space-y-3"></div>
+    <div id="leaderModal" class="fixed inset-0 bg-black/98 hidden flex-col z-[200] p-6 animate__animated animate__fadeInUp">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h3 class="text-2xl font-black italic text-primary">LEADERBOARD</h3>
+                <p class="text-[9px] opacity-40 uppercase tracking-widest">Top Performers Today</p>
+            </div>
+            <button onclick="document.getElementById('leaderModal').style.display='none'" class="w-10 h-10 glass rounded-full flex items-center justify-center border border-white/10 text-primary">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div id="leaderList" class="flex-1 overflow-y-auto pr-2 pb-10">
+            </div>
+    </div>
+
+    <div id="themeModal" class="fixed inset-0 bg-black/98 hidden items-center justify-center p-8 z-[200] animate__animated animate__fadeIn">
+        <div class="glass w-full max-w-sm p-8 rounded-[3rem] border-primary/20">
+            <h3 class="text-center font-black mb-8 text-sm uppercase tracking-widest opacity-50">Select Theme</h3>
+            <div class="grid grid-cols-2 gap-4 mb-8">
+                <button onclick="setTheme('midnight')" class="p-4 rounded-2xl bg-[#3b82f6]/20 border border-[#3b82f6] text-[10px] font-black">MIDNIGHT</button>
+                <button onclick="setTheme('sunset')" class="p-4 rounded-2xl bg-[#f97316]/20 border border-[#f97316] text-[10px] font-black text-[#f97316]">SUNSET</button>
+                <button onclick="setTheme('emerald')" class="p-4 rounded-2xl bg-[#10b981]/20 border border-[#10b981] text-[10px] font-black text-[#10b981]">EMERALD</button>
+                <button onclick="setTheme('purple')" class="p-4 rounded-2xl bg-[#a855f7]/20 border border-[#a855f7] text-[10px] font-black text-[#a855f7]">PURPLE</button>
+            </div>
+            <button onclick="document.getElementById('themeModal').style.display='none'" class="w-full bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase">Close</button>
+        </div>
     </div>
 
     <div id="taskModal" class="fixed inset-0 bg-black/98 hidden items-center justify-center p-6 z-[200] animate__animated animate__zoomIn">
         <div class="glass w-full max-w-sm p-10 rounded-[3.5rem] border-primary/20">
             <h3 class="text-center font-black mb-8 text-primary uppercase tracking-widest">Task Sync</h3>
             <div class="space-y-4 mb-8">
-                <div class="bg-black/40 p-5 rounded-[1.5rem] flex justify-between items-center border border-white/5">
-                    <div><p class="text-[8px] opacity-40 uppercase mb-1">User</p><p id="genUser" class="text-xs text-primary font-mono font-bold"></p></div>
-                    <button onclick="copyText('genUser')" class="text-white/20 hover:text-primary"><i class="fas fa-copy"></i></button>
-                </div>
-                <div class="bg-black/40 p-5 rounded-[1.5rem] flex justify-between items-center border border-white/5">
-                    <div><p class="text-[8px] opacity-40 uppercase mb-1">Pass</p><p id="genPass" class="text-xs text-primary font-mono font-bold"></p></div>
-                    <button onclick="copyText('genPass')" class="text-white/20 hover:text-primary"><i class="fas fa-copy"></i></button>
-                </div>
+                <div class="bg-black/40 p-5 rounded-[1.5rem] flex justify-between items-center border border-white/5"><div><p class="text-[8px] opacity-40 uppercase mb-1">User</p><p id="genUser" class="text-xs text-primary font-mono font-bold"></p></div><button onclick="copyText('genUser')" class="text-white/20 hover:text-primary"><i class="fas fa-copy"></i></button></div>
+                <div class="bg-black/40 p-5 rounded-[1.5rem] flex justify-between items-center border border-white/5"><div><p class="text-[8px] opacity-40 uppercase mb-1">Pass</p><p id="genPass" class="text-xs text-primary font-mono font-bold"></p></div><button onclick="copyText('genPass')" class="text-white/20 hover:text-primary"><i class="fas fa-copy"></i></button></div>
             </div>
             <textarea id="cookies" rows="4" class="w-full bg-white/5 p-5 rounded-[1.5rem] text-[10px] outline-none border border-white/5 focus:border-primary mb-6" placeholder="Paste Cookies..."></textarea>
-            <div class="flex gap-4">
-                <button onclick="document.getElementById('taskModal').style.display='none'" class="flex-1 bg-white/5 py-4 rounded-[1.5rem] font-bold text-[10px]">BACK</button>
-                <button onclick="submitTask()" class="flex-1 bg-primary py-4 rounded-[1.5rem] font-black text-[10px] shadow-lg shadow-primary/20">SUBMIT</button>
-            </div>
+            <div class="flex gap-4"><button onclick="document.getElementById('taskModal').style.display='none'" class="flex-1 bg-white/5 py-4 rounded-[1.5rem] font-bold text-[10px]">BACK</button><button onclick="submitTask()" class="flex-1 bg-primary py-4 rounded-[1.5rem] font-black text-[10px] shadow-lg shadow-primary/20">SUBMIT</button></div>
         </div>
     </div>
 
@@ -352,11 +412,6 @@
             document.getElementById('taskModal').style.display = 'flex';
             document.getElementById('genUser').innerText = 'if_worker_' + Math.floor(1000 + Math.random()*9000);
             document.getElementById('genPass').innerText = 'pass' + Math.floor(100 + Math.random()*900) + '!!';
-        };
-        window.handleAuth = (type) => {
-            const e = document.getElementById('email').value, p = document.getElementById('pass').value;
-            if(!e || !p) return showToast("Fields Required!");
-            signInWithEmailAndPassword(auth, e, p).catch(() => createUserWithEmailAndPassword(auth, e, p));
         };
     </script>
 </body>
