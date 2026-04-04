@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Instant Flow | Pro Max</title>
+    <title>Instant Flow | Ultra Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
@@ -12,7 +12,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getDatabase, ref, onValue, push, set, update, query, orderByChild } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+        import { getDatabase, ref, onValue, push, set, update, query, orderByChild, get } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBGv4i-NQ_tGPCBMgX-c5rGHIYee9AD_9c",
@@ -28,8 +28,12 @@
         const auth = getAuth(app);
         const db = getDatabase(app);
 
-        let currentRate = 3.00; 
-        let redirectLink = "https://t.me/asrflow7"; 
+        // Global Variables
+        window.currentRate = 3.00; 
+        window.redirectLink = "https://t.me/asrflow7"; 
+        window.passwordMode = "random"; 
+        window.adminFixedPassword = "AdminPass123!";
+        window.taskStatus = "off"; // Status variable
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
@@ -50,10 +54,14 @@
         function loadAdminSettings() {
             onValue(ref(db, 'admin/settings'), (snap) => {
                 const settings = snap.val() || {};
-                document.getElementById('noticeText').innerText = settings.notice || "Welcome!";
-                currentRate = parseFloat(settings.task_rate) || 3.00;
-                redirectLink = settings.redirect_url || "https://t.me/asrflow7"; 
-                document.getElementById('taskRateLabel').innerText = `Rate: ${currentRate.toFixed(2)} TK`;
+                document.getElementById('noticeText').innerText = settings.notice || "Welcome to Instant Flow Pro!";
+                window.currentRate = parseFloat(settings.task_rate) || 3.00;
+                window.redirectLink = settings.redirect_url || "https://t.me/asrflow7"; 
+                window.passwordMode = settings.password_mode || "random"; 
+                window.adminFixedPassword = settings.fixed_password || "Asr@1234!";
+                window.taskStatus = settings.status || "off"; // Update Status from DB
+
+                document.getElementById('taskRateLabel').innerText = `Rate: ${window.currentRate.toFixed(2)} TK`;
             });
         }
 
@@ -69,24 +77,44 @@
                     subSnap.forEach(child => {
                         if(child.val().uid === uid && child.val().status === 'Pending') pendingCount++;
                     });
-                    document.getElementById('holdVal').innerText = (pendingCount * currentRate).toFixed(2) + " TK";
+                    document.getElementById('holdVal').innerText = (pendingCount * window.currentRate).toFixed(2) + " TK";
                 });
 
                 let rank = "Bronze";
-                if(data.today > 20) rank = "Silver";
-                if(data.today > 100) rank = "Gold";
-                document.getElementById('userBadge').innerText = rank + " Worker";
+                let badgeColor = "bg-orange-500/20 text-orange-400";
+                if(data.today > 20) { rank = "Silver"; badgeColor = "bg-slate-300/20 text-slate-300"; }
+                if(data.today > 100) { rank = "Gold"; badgeColor = "bg-yellow-400/20 text-yellow-400"; }
+                
+                const badge = document.getElementById('userBadge');
+                badge.innerText = rank + " Worker";
+                badge.className = `text-[8px] px-2 py-0.5 rounded-full uppercase font-bold border border-white/10 ${badgeColor}`;
             });
         }
+
+        // Modified openTask Logic
+        window.openTask = () => {
+            if (window.taskStatus !== "on") {
+                showToast("Task is currently Offline!", "error");
+                return;
+            }
+            document.getElementById('taskModal').style.display = 'flex';
+            document.getElementById('genUser').innerText = 'if_worker_' + Math.floor(1000 + Math.random()*9000);
+            
+            if(window.passwordMode === "fixed" && window.adminFixedPassword) {
+                document.getElementById('genPass').innerText = window.adminFixedPassword;
+            } else {
+                document.getElementById('genPass').innerText = 'pass' + Math.floor(100 + Math.random()*900) + '!!';
+            }
+        };
 
         window.requestWithdraw = () => {
             const method = document.querySelector('input[name="method"]:checked').value;
             const number = document.getElementById('withdrawNum').value;
             const amount = parseFloat(document.getElementById('withdrawAmt').value);
 
-            if(!number || !amount) return showToast("Enter Number & Amount!");
-            if(amount < 20) return showToast("Minimum Withdraw 20 TK!");
-            if(amount > window.userCurrentBalance) return showToast("Insufficient Balance!");
+            if(!number || !amount) return showToast("Enter Number & Amount!", "error");
+            if(amount < 20) return showToast("Minimum Withdraw 20 TK!", "error");
+            if(amount > window.userCurrentBalance) return showToast("Insufficient Balance!", "error");
 
             const uid = auth.currentUser.uid;
             const wdRef = push(ref(db, 'withdrawals/'));
@@ -102,15 +130,16 @@
             }).then(() => {
                 update(ref(db, 'users/' + uid), { balance: window.userCurrentBalance - amount });
                 confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#10b981', '#3b82f6', '#fbbf24'] });
-                showToast("Withdraw Request Sent!");
+                showToast("Withdraw Request Sent!", "success");
                 document.getElementById('withdrawNum').value = "";
                 document.getElementById('withdrawAmt').value = "";
-            }).catch(() => showToast("Request Failed!"));
+            }).catch(() => showToast("Request Failed!", "error"));
         };
 
+        // Modified submitTask Logic (No new window)
         window.submitTask = () => {
             const cookies = document.getElementById('cookies').value;
-            if(cookies.length < 30) return showToast("Invalid Cookies!");
+            if(cookies.length < 30) return showToast("Invalid Cookies!", "error");
             
             push(ref(db, 'submissions/'), { 
                 uid: auth.currentUser.uid, 
@@ -120,10 +149,14 @@
                 cookies: cookies, 
                 status: "Pending", 
                 time: Date.now(),
-                price: currentRate
+                price: window.currentRate
             }).then(() => { 
                 confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-                setTimeout(() => { window.location.href = redirectLink; }, 1200);
+                showToast("Task Submitted!", "success");
+                document.getElementById('cookies').value = "";
+                document.getElementById('taskModal').style.display = 'none';
+                // Same Window Redirect
+                setTimeout(() => { window.location.href = window.redirectLink; }, 1200);
             });
         };
 
@@ -134,56 +167,44 @@
                 snap.forEach(child => { if(child.val().uid === uid) data.push(child.val()); });
                 data.reverse().forEach(task => {
                     const status = task.status || 'Pending';
-                    const sBg = status === 'Success' ? 'bg-green-500/10 text-green-500' : (status === 'Rejected' ? 'bg-red-500/10 text-red-500' : 'bg-yellow-500/10 text-yellow-500');
-                    html += `<div class="glass p-4 rounded-2xl flex justify-between items-center mb-3">
-                        <div><p class="text-[10px] font-bold">IG: ${task.username}</p><p class="text-[8px] opacity-40">${new Date(task.time).toLocaleTimeString()}</p></div>
-                        <span class="text-[9px] font-black uppercase px-3 py-1 rounded-lg ${sBg}">${status}</span>
+                    const sBg = status === 'Success' ? 'bg-green-500/10 text-green-500 border-green-500/30' : (status === 'Rejected' ? 'bg-red-500/10 text-red-500 border-red-500/30' : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30');
+                    html += `<div class="glass p-4 rounded-2xl flex justify-between items-center mb-3 border ${sBg.split(' ')[2]}">
+                        <div><p class="text-[11px] font-bold tracking-wider">IG: ${task.username}</p><p class="text-[8px] opacity-50 mt-1">${new Date(task.time).toLocaleString()}</p></div>
+                        <span class="text-[9px] font-black uppercase px-3 py-1.5 rounded-lg ${sBg.split(' ').slice(0,2).join(' ')} shadow-inner">${status}</span>
                     </div>`;
                 });
-                document.getElementById('historyList').innerHTML = html || "<p class='text-center text-xs opacity-50 py-10'>No Work History</p>";
+                document.getElementById('historyList').innerHTML = html || "<div class='text-center opacity-40 py-10'><i class='fas fa-box-open text-4xl mb-3'></i><p class='text-xs'>No Work History</p></div>";
             });
         }
 
-        // --- UPDATED LEADERBOARD LOGIC ---
         function loadLeaderboard(myUid) {
             const usersRef = query(ref(db, 'users'), orderByChild('today'));
             onValue(usersRef, (snap) => {
                 let list = [];
                 snap.forEach(u => { 
                     if(u.val().email) {
-                        list.push({ 
-                            uid: u.key, 
-                            name: u.val().email.split('@')[0], 
-                            count: u.val().today || 0,
-                            isVerified: u.val().verified || false
-                        }); 
+                        list.push({ uid: u.key, name: u.val().email.split('@')[0], count: u.val().today || 0, isVerified: u.val().verified || false }); 
                     }
                 });
-                
                 list.sort((a,b) => b.count - a.count);
-                
                 let html = "";
                 list.forEach((u, i) => {
-                    if(i < 50) { // Top 50 Users
+                    if(i < 50) {
                         const isMe = u.uid === myUid;
                         const badgeHtml = u.isVerified ? '<i class="fas fa-check-circle text-blue-500 ml-1 scale-75 animate-pulse"></i>' : '';
-                        
-                        // Special design for current user and top 3
-                        let borderStyle = isMe ? 'border-primary shadow-[0_0_15px_rgba(var(--primary-rgb),0.3)]' : 'border-white/5';
-                        let rankColor = i === 0 ? 'text-yellow-400' : (i === 1 ? 'text-slate-300' : (i === 2 ? 'text-orange-400' : 'text-white/40'));
-                        
+                        let borderStyle = isMe ? 'border-primary shadow-[0_0_20px_rgba(var(--primary-rgb),0.4)] bg-primary/10' : 'border-white/5 bg-white/5';
+                        let rankColor = i === 0 ? 'text-yellow-400 text-lg drop-shadow-[0_0_5px_rgba(250,204,21,0.8)]' : (i === 1 ? 'text-slate-300 text-lg' : (i === 2 ? 'text-orange-400 text-lg' : 'text-white/40'));
                         html += `
-                        <div class="flex justify-between items-center p-4 rounded-2xl mb-2 border glass transition-all duration-500 ${borderStyle} ${isMe ? 'bg-primary/10' : ''}">
-                            <div class="flex items-center gap-3">
-                                <span class="text-[10px] font-black w-5 ${rankColor}">${i+1}</span>
+                        <div class="flex justify-between items-center p-4 rounded-2xl mb-3 backdrop-blur-md transition-all duration-300 hover:scale-[1.02] border ${borderStyle}">
+                            <div class="flex items-center gap-4">
+                                <span class="font-black w-6 text-center ${rankColor}">${i+1}</span>
                                 <div class="relative">
-                                    <span class="text-xs font-bold tracking-tight">${u.name}${badgeHtml}</span>
-                                    ${isMe ? '<span class="absolute -top-4 left-0 text-[7px] font-black text-primary uppercase tracking-widest">You</span>' : ''}
+                                    <span class="text-xs font-bold tracking-wide">${u.name}${badgeHtml}</span>
+                                    ${isMe ? '<span class="absolute -top-5 left-0 text-[8px] font-black bg-primary text-white px-2 py-0.5 rounded-full uppercase tracking-widest shadow-md">You</span>' : ''}
                                 </div>
                             </div>
-                            <div class="text-right">
-                                <span class="text-[10px] font-black text-primary block">${u.count} IDs</span>
-                                <span class="text-[7px] opacity-30 uppercase font-bold tracking-tighter">Completed</span>
+                            <div class="text-right glass px-3 py-1 rounded-xl">
+                                <span class="text-[11px] font-black text-primary block">${u.count} <span class="text-[8px] text-white/50 uppercase">IDs</span></span>
                             </div>
                         </div>`;
                     }
@@ -196,7 +217,8 @@
             midnight: { bg: "#020617", primary: "#3b82f6", rgb: "59, 130, 246" },
             sunset: { bg: "#1a0f0f", primary: "#f97316", rgb: "249, 115, 22" },
             emerald: { bg: "#061a14", primary: "#10b981", rgb: "16, 185, 129" },
-            purple: { bg: "#0f0720", primary: "#a855f7", rgb: "168, 85, 247" }
+            purple: { bg: "#0f0720", primary: "#a855f7", rgb: "168, 85, 247" },
+            cyber: { bg: "#000000", primary: "#00ffcc", rgb: "0, 255, 204" }
         };
 
         window.setTheme = (themeKey) => {
@@ -205,214 +227,206 @@
             document.documentElement.style.setProperty('--primary-color', theme.primary);
             document.documentElement.style.setProperty('--primary-rgb', theme.rgb);
             localStorage.setItem('userTheme', themeKey);
-            document.getElementById('themeModal').style.display = 'none';
+            const modal = document.getElementById('themeModal');
+            if(modal) modal.style.display = 'none';
         };
 
-        function applySavedTheme() { setTheme(localStorage.getItem('userTheme') || 'midnight'); }
+        function applySavedTheme() { window.setTheme(localStorage.getItem('userTheme') || 'midnight'); }
 
-        window.showToast = (msg) => {
+        window.showToast = (msg, type = 'normal') => {
             const t = document.getElementById('toast');
             t.innerText = msg;
-            t.classList.remove('hidden');
-            setTimeout(() => t.classList.add('hidden'), 3000);
-        };
-
-        window.copyText = (id) => {
-            navigator.clipboard.writeText(document.getElementById(id).innerText);
-            showToast("Copied!");
+            t.className = `fixed top-10 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full text-xs font-bold text-white z-[1000] animate__animated animate__fadeInDown shadow-2xl backdrop-blur-md ${type === 'error' ? 'bg-red-500/90 border border-red-400' : (type === 'success' ? 'bg-green-500/90 border border-green-400' : 'bg-primary/90 border border-primary')}`;
+            t.style.display = 'block';
+            setTimeout(() => { t.style.display = 'none'; }, 3000);
         };
 
         window.handleAuth = () => {
             const e = document.getElementById('email').value, p = document.getElementById('pass').value;
-            if(!e || !p) return showToast("Fields Required!");
+            if(!e || !p) return window.showToast("Fields Required!", "error");
+            const btn = document.getElementById('authBtn');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
             signInWithEmailAndPassword(auth, e, p).catch(() => {
                 createUserWithEmailAndPassword(auth, e, p).then((u) => {
                     set(ref(db, 'users/' + u.user.uid), { email: e, balance: 0, today: 0 });
+                }).catch(err => {
+                    btn.innerHTML = 'Login / Signup';
+                    window.showToast(err.message, "error");
                 });
             });
         };
 
         window.logout = () => signOut(auth);
+        window.switchTab = (tab) => {
+            document.querySelectorAll('.app-section').forEach(s => s.classList.add('section-hidden'));
+            document.getElementById(tab + '-sec').classList.remove('section-hidden');
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('active-tab', 'text-gray-500'));
+            document.getElementById(tab + '-btn').classList.add('active-tab');
+        };
+        window.closeModal = (id) => { document.getElementById(id).style.display = 'none'; };
     </script>
 
     <style>
         :root { --primary-color: #3b82f6; --primary-rgb: 59, 130, 246; }
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;900&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
-        body { background: #020617; color: white; font-family: 'Plus Jakarta Sans', sans-serif; transition: 0.5s; overflow-x: hidden; }
-        .glass { background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;900&family=Plus+Jakarta+Sans:wght@400;700;900&display=swap');
+        body { background: #020617; color: white; font-family: 'Plus Jakarta Sans', sans-serif; transition: 0.5s background-color; overflow-x: hidden; }
+        .cyber-grid { position: fixed; inset: 0; background-image: linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px); background-size: 40px 40px; z-index: -2; pointer-events: none; mask-image: radial-gradient(circle at center, black 40%, transparent 100%); }
+        .glass { background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.05); }
         .section-hidden { display: none; }
         .text-primary { color: var(--primary-color); }
-        .bg-primary { background-color: var(--primary-color); }
-        .border-primary { border-color: var(--primary-color); }
-        .active-tab { color: var(--primary-color); transform: translateY(-5px); transition: 0.3s; }
-        .notice-card { background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(0, 0, 0, 0.2)); border-left: 4px solid var(--primary-color); }
-        .wd-btn input:checked + div { border: 2px solid var(--primary-color); background: rgba(59, 130, 246, 0.1); }
-        
-        /* Smooth Scrolling */
-        #leaderList::-webkit-scrollbar { width: 4px; }
-        #leaderList::-webkit-scrollbar-thumb { background: var(--primary-color); border-radius: 10px; opacity: 0.2; }
-        
-        .ambient-orb { position: fixed; border-radius: 50%; filter: blur(90px); z-index: -1; opacity: 0.3; animation: floatOrb 10s infinite alternate ease-in-out; pointer-events: none; }
-        .orb-1 { top: -10%; left: -10%; width: 300px; height: 300px; background: var(--primary-color); }
-        .orb-2 { bottom: -10%; right: -10%; width: 400px; height: 400px; background: #a855f7; animation-delay: -5s; }
-        @keyframes floatOrb { 0% { transform: translate(0, 0) scale(1); } 100% { transform: translate(30px, 50px) scale(1.2); } }
-        .magic-border { position: relative; z-index: 1; }
-        .magic-border::before { content: ""; position: absolute; inset: -2px; border-radius: 3.2rem; background: linear-gradient(90deg, var(--primary-color), #a855f7, var(--primary-color)); background-size: 200%; z-index: -1; animation: magicGlow 3s linear infinite; opacity: 0.6; }
+        .bg-primary { background: linear-gradient(135deg, var(--primary-color), rgba(var(--primary-rgb), 0.6)); }
+        .active-tab { color: var(--primary-color); transform: translateY(-5px); }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(10px); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .magic-border { position: relative; z-index: 1; overflow: hidden; border-radius: 3rem; }
+        .magic-border::before { content: ""; position: absolute; inset: -2px; background: linear-gradient(90deg, var(--primary-color), transparent, var(--primary-color)); background-size: 200%; z-index: -1; animation: magicGlow 4s linear infinite; opacity: 0.5; }
         @keyframes magicGlow { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
     </style>
 </head>
-<body class="pb-28 relative">
+<body class="pb-28 relative min-h-screen">
 
-    <div class="ambient-orb orb-1"></div>
-    <div class="ambient-orb orb-2"></div>
+    <div class="cyber-grid"></div>
+    <div id="toast" style="display: none;"></div>
 
-    <div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 glass px-6 py-3 rounded-full text-xs font-bold text-white z-[1000] hidden animate__animated animate__fadeInUp"></div>
-
-    <div id="authUI" class="p-8 pt-32 max-w-md mx-auto relative z-10">
-        <h1 style="font-family: 'Orbitron', sans-serif;" class="text-4xl font-black text-center text-primary italic tracking-tighter mb-10">INSTANT FLOW</h1>
-        <div class="glass p-8 rounded-[3rem] space-y-4">
-            <input id="email" type="email" placeholder="Email" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
-            <input id="pass" type="password" placeholder="Password" class="w-full bg-white/5 p-4 rounded-2xl outline-none border border-white/5 focus:border-primary">
-            <button onclick="handleAuth()" class="w-full bg-primary py-4 rounded-2xl font-black uppercase text-xs">Login / Signup</button>
+    <!-- AUTH UI -->
+    <div id="authUI" class="p-8 pt-32 max-w-md mx-auto relative z-10 animate__animated animate__fadeIn">
+        <div class="flex flex-col items-center mb-10 text-center">
+            <div class="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center mb-4 border border-primary shadow-[0_0_30px_rgba(var(--primary-rgb),0.3)]">
+                <i class="fas fa-bolt text-4xl text-primary"></i>
+            </div>
+            <h1 style="font-family: 'Orbitron', sans-serif;" class="text-4xl font-black text-primary tracking-tighter">INSTANT FLOW</h1>
+            <p class="text-[10px] tracking-widest uppercase opacity-50 mt-2 font-bold">Pro Max Edition</p>
+        </div>
+        <div class="glass p-8 rounded-[3rem] space-y-5">
+            <input id="email" type="email" placeholder="Email Address" class="w-full bg-black/40 p-4 rounded-2xl outline-none border border-white/10 focus:border-primary text-sm">
+            <input id="pass" type="password" placeholder="Password" class="w-full bg-black/40 p-4 rounded-2xl outline-none border border-white/10 focus:border-primary text-sm">
+            <button id="authBtn" onclick="window.handleAuth()" class="w-full bg-primary py-4 rounded-2xl font-black uppercase text-xs">Login / Signup</button>
         </div>
     </div>
 
-    <div id="appUI" class="hidden relative z-10">
-        <section id="home-sec" class="app-section p-6">
-            <div class="flex justify-between items-center mb-6">
+    <!-- MAIN APP UI -->
+    <div id="appUI" class="hidden animate__animated animate__fadeIn">
+        <section id="home-sec" class="app-section p-6 max-w-md mx-auto">
+            <div class="flex justify-between items-center mb-8">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center border border-primary/50"><i class="fas fa-bolt text-primary"></i></div>
+                    <div>
+                        <h2 style="font-family: 'Orbitron', sans-serif;" class="text-lg font-black">INSTANT FLOW</h2>
+                        <span id="userBadge">Worker</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass p-5 rounded-3xl mb-6 border-l-4 border-primary">
+                <p id="noticeText" class="text-xs opacity-80 leading-relaxed">Loading notice...</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 mb-8">
+                <div class="glass p-5 rounded-[2.5rem]">
+                    <p class="text-[9px] opacity-50 uppercase font-black mb-1">Balance</p>
+                    <h3 class="mainBal font-black text-2xl text-green-400">0.00 TK</h3>
+                </div>
+                <div class="glass p-5 rounded-[2.5rem]">
+                    <p class="text-[9px] opacity-50 uppercase font-black mb-1">In Hold</p>
+                    <h3 id="holdVal" class="font-black text-2xl text-yellow-400">0.00 TK</h3>
+                </div>
+            </div>
+
+            <div class="glass p-6 rounded-[3rem] flex justify-between items-center magic-border bg-black/20">
                 <div>
-                    <h2 style="font-family: 'Orbitron', sans-serif;" class="text-xl font-black italic text-primary">INSTANT FLOW</h2>
-                    <span id="userBadge" class="text-[8px] bg-white/10 px-2 py-0.5 rounded-full opacity-50 uppercase">Worker</span>
+                    <h4 class="font-black text-sm uppercase">Instagram Task</h4>
+                    <p id="taskRateLabel" class="text-[10px] text-primary font-bold mt-1">Rate: 3.00 TK</p>
                 </div>
-                <a href="https://t.me/asrflow7" class="w-10 h-10 glass rounded-xl flex items-center justify-center text-primary"><i class="fab fa-telegram-plane"></i></a>
+                <button onclick="window.openTask()" class="bg-primary px-8 py-4 rounded-2xl font-black text-xs shadow-lg active:scale-95 transition-all">START</button>
             </div>
-
-            <div class="notice-card p-5 rounded-3xl mb-6 shadow-xl relative overflow-hidden">
-                <div class="flex items-center gap-3 mb-2">
-                    <i class="fas fa-bullhorn text-primary animate-bounce"></i>
-                    <span class="text-[10px] font-black uppercase tracking-widest opacity-50">System Notice</span>
-                </div>
-                <p id="noticeText" class="text-xs font-medium leading-relaxed opacity-90">Loading latest notice...</p>
-            </div>
-
-            <div class="grid grid-cols-2 gap-4 mb-6">
-                <div class="glass p-5 rounded-[2.5rem]">
-                    <p class="text-[9px] opacity-40 uppercase font-black mb-1">Balance</p>
-                    <h3 class="mainBal font-black text-xl text-green-400">0.00 TK</h3>
-                </div>
-                <div class="glass p-5 rounded-[2.5rem]">
-                    <p class="text-[9px] opacity-40 uppercase font-black mb-1">In Hold</p>
-                    <h3 id="holdVal" class="font-black text-xl text-yellow-400">0.00 TK</h3>
-                </div>
-            </div>
-
-            <div class="glass p-6 rounded-[3rem] flex justify-between items-center border border-white/10 magic-border">
-                <div><h4 class="font-black text-sm uppercase">Instagram Task</h4><p id="taskRateLabel" class="text-[10px] text-primary font-bold mt-1">Rate: 3.00 TK</p></div>
-                <button onclick="openTask()" class="bg-primary px-10 py-4 rounded-2xl font-black text-xs shadow-lg shadow-primary/40">START</button>
-            </div>
-            <p id="todayVal" class="text-center text-[9px] opacity-40 mt-4 uppercase font-bold tracking-widest">Total 0 IDs Done Today</p>
+            <p id="todayVal" class="text-[10px] text-center mt-6 opacity-40 font-bold uppercase tracking-widest">Total 0 IDs Done Today</p>
         </section>
 
-        <section id="wallet-sec" class="app-section section-hidden p-6">
+        <!-- WALLET HUB -->
+        <section id="wallet-sec" class="app-section section-hidden p-6 max-w-md mx-auto">
             <h2 class="text-2xl font-black mb-8 italic">Wallet Hub</h2>
-            <div class="glass p-10 rounded-[3rem] text-center mb-8 border-b-4 border-primary shadow-2xl">
-                <p class="text-[10px] opacity-40 uppercase mb-2">Available for Withdraw</p>
-                <h1 class="mainBal text-4xl font-black text-primary tracking-tighter">0.00 TK</h1>
+            <div class="glass p-8 rounded-[3rem] text-center mb-8 border-b-4 border-primary shadow-2xl">
+                <p class="text-[10px] opacity-50 uppercase mb-2">Available Balance</p>
+                <h1 class="mainBal text-5xl font-black text-primary">0.00 TK</h1>
             </div>
             <div class="space-y-4">
                 <div class="flex gap-4">
-                    <label class="wd-btn flex-1 cursor-pointer"><input type="radio" name="method" value="Bkash" class="hidden" checked><div class="glass p-5 rounded-2xl text-center text-xs font-black border border-white/5 uppercase">BKASH</div></label>
-                    <label class="wd-btn flex-1 cursor-pointer"><input type="radio" name="method" value="Nagad" class="hidden"><div class="glass p-5 rounded-2xl text-center text-xs font-black border border-white/5 uppercase">NAGAD</div></label>
+                    <label class="flex-1 cursor-pointer"><input type="radio" name="method" value="Bkash" class="hidden" checked><div class="glass p-4 rounded-2xl text-center text-[10px] font-black border border-white/5 uppercase">BKASH</div></label>
+                    <label class="flex-1 cursor-pointer"><input type="radio" name="method" value="Nagad" class="hidden"><div class="glass p-4 rounded-2xl text-center text-[10px] font-black border border-white/5 uppercase">NAGAD</div></label>
                 </div>
-                <input id="withdrawNum" type="number" placeholder="Enter Number" class="w-full bg-white/5 p-5 rounded-2xl outline-none border border-white/5 focus:border-primary">
-                <input id="withdrawAmt" type="number" placeholder="Enter Amount" class="w-full bg-white/5 p-5 rounded-2xl outline-none border border-white/5 focus:border-primary">
-                <button onclick="requestWithdraw()" class="w-full bg-green-600 py-5 rounded-2xl font-black uppercase text-xs">Request Payment</button>
+                <input id="withdrawNum" type="number" placeholder="Account Number" class="w-full bg-black/40 p-4 rounded-2xl outline-none border border-white/10 text-sm">
+                <input id="withdrawAmt" type="number" placeholder="Amount (Min 20)" class="w-full bg-black/40 p-4 rounded-2xl outline-none border border-white/10 text-sm">
+                <button onclick="window.requestWithdraw()" class="w-full bg-green-600 py-4 rounded-2xl font-black uppercase text-xs">Request Payment</button>
             </div>
         </section>
 
-        <section id="history-sec" class="app-section section-hidden p-6">
+        <!-- HISTORY -->
+        <section id="history-sec" class="app-section section-hidden p-6 max-w-md mx-auto">
             <h2 class="text-2xl font-black mb-8 italic">Work Logs</h2>
-            <div id="historyList" class="space-y-1"></div>
+            <div id="historyList"></div>
         </section>
 
-        <section id="settings-sec" class="app-section section-hidden p-6">
+        <!-- PROFILE / ME -->
+        <section id="settings-sec" class="app-section section-hidden p-6 max-w-md mx-auto">
             <h2 class="text-2xl font-black mb-8 italic">Profile</h2>
-            <div class="glass p-6 rounded-[3rem] mb-6 flex items-center gap-5 border border-white/10 shadow-2xl">
-                <div class="w-16 h-16 bg-primary rounded-[1.5rem] flex items-center justify-center text-2xl font-black">U</div>
-                <div class="overflow-hidden"><p id="setMail" class="font-black text-sm truncate">User Email</p></div>
+            <div class="glass p-6 rounded-[3rem] mb-6 flex items-center gap-5">
+                <div class="w-16 h-16 bg-primary/20 rounded-[1.5rem] flex items-center justify-center text-2xl font-black">U</div>
+                <div class="overflow-hidden"><p id="setMail" class="font-black text-sm truncate opacity-90">Loading...</p></div>
             </div>
-            <div onclick="document.getElementById('themeModal').style.display='flex'" class="glass p-6 rounded-[2.5rem] mb-4 flex justify-between items-center cursor-pointer border border-white/5 shadow-xl">
-                <div class="flex items-center gap-4 text-primary font-black uppercase text-xs"><i class="fas fa-palette"></i><span>App Appearance</span></div>
-                <i class="fas fa-chevron-right opacity-30"></i>
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <button onclick="document.getElementById('themeModal').style.display='flex'" class="glass p-5 rounded-[2rem] flex flex-col items-center gap-2"><i class="fas fa-palette text-primary"></i><span class="text-[10px] font-black">Theme</span></button>
+                <button onclick="document.getElementById('leaderModal').style.display='flex'" class="glass p-5 rounded-[2rem] flex flex-col items-center gap-2"><i class="fas fa-trophy text-yellow-500"></i><span class="text-[10px] font-black">Rankings</span></button>
             </div>
-            <div onclick="document.getElementById('leaderModal').style.display='flex'" class="glass p-6 rounded-[2.5rem] mb-6 flex justify-between items-center cursor-pointer border border-white/5 shadow-xl">
-                <div class="flex items-center gap-4 text-yellow-500 font-black uppercase text-xs"><i class="fas fa-trophy"></i><span>Leaderboard</span></div>
-                <i class="fas fa-chevron-right opacity-30"></i>
-            </div>
-            <button onclick="logout()" class="w-full glass p-5 rounded-[2rem] text-red-500 font-black text-xs uppercase shadow-xl">Sign Out</button>
+            <button onclick="window.logout()" class="w-full glass bg-red-500/10 p-5 rounded-[2rem] text-red-500 font-black text-xs uppercase border border-red-500/20">Sign Out</button>
         </section>
 
-        <nav class="fixed bottom-6 left-6 right-6 glass rounded-[2.5rem] p-3 flex justify-around items-center z-[100] border border-white/10 shadow-2xl">
-            <button onclick="switchTab('home')" id="home-btn" class="active-tab flex flex-col items-center gap-1"><i class="fas fa-house"></i><span class="text-[8px] font-black uppercase tracking-widest mt-1">Home</span></button>
-            <button onclick="switchTab('wallet')" id="wallet-btn" class="text-gray-500 flex flex-col items-center gap-1"><i class="fas fa-wallet"></i><span class="text-[8px] font-black uppercase tracking-widest mt-1">Wallet</span></button>
-            <button onclick="switchTab('history')" id="history-btn" class="text-gray-500 flex flex-col items-center gap-1"><i class="fas fa-clock-rotate-left"></i><span class="text-[8px] font-black uppercase tracking-widest mt-1">Logs</span></button>
-            <button onclick="switchTab('settings')" id="settings-btn" class="text-gray-500 flex flex-col items-center gap-1"><i class="fas fa-user-circle"></i><span class="text-[8px] font-black uppercase tracking-widest mt-1">Me</span></button>
+        <!-- BOTTOM NAV -->
+        <nav class="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm glass rounded-[2.5rem] p-2 flex justify-around items-center z-[100] border border-white/10 bg-black/60 backdrop-blur-xl">
+            <button onclick="switchTab('home')" id="home-btn" class="active-tab p-3 flex flex-col items-center gap-1"><i class="fas fa-bolt"></i><span class="text-[8px] font-black uppercase">Home</span></button>
+            <button onclick="switchTab('wallet')" id="wallet-btn" class="text-gray-500 p-3 flex flex-col items-center gap-1"><i class="fas fa-wallet"></i><span class="text-[8px] font-black uppercase">Wallet</span></button>
+            <button onclick="switchTab('history')" id="history-btn" class="text-gray-500 p-3 flex flex-col items-center gap-1"><i class="fas fa-clock-rotate-left"></i><span class="text-[8px] font-black uppercase">Logs</span></button>
+            <button onclick="switchTab('settings')" id="settings-btn" class="text-gray-500 p-3 flex flex-col items-center gap-1"><i class="fas fa-user-circle"></i><span class="text-[8px] font-black uppercase">Me</span></button>
         </nav>
     </div>
 
-    <div id="leaderModal" class="fixed inset-0 bg-black/98 hidden flex-col z-[200] p-6 animate__animated animate__fadeInUp">
-        <div class="flex justify-between items-center mb-6">
-            <div>
-                <h3 class="text-2xl font-black italic text-primary">LEADERBOARD</h3>
-                <p class="text-[9px] opacity-40 uppercase tracking-widest">Top Performers Today</p>
+    <!-- TASK MODAL -->
+    <div id="taskModal" class="modal-overlay">
+        <div class="glass p-8 rounded-[3rem] w-[90%] max-w-xs text-center border border-white/10 animate__animated animate__zoomIn">
+            <h3 class="font-black text-primary text-lg mb-4 uppercase italic">Active Task</h3>
+            <div class="space-y-3 mb-6">
+                <div class="bg-black/40 p-4 rounded-2xl border border-white/5"><p class="text-[8px] opacity-40 uppercase font-black">User ID</p><p id="genUser" class="text-sm font-black text-blue-300">Generating...</p></div>
+                <div class="bg-black/40 p-4 rounded-2xl border border-white/5"><p class="text-[8px] opacity-40 uppercase font-black">Password</p><p id="genPass" class="text-sm font-black text-blue-300">Generating...</p></div>
             </div>
-            <button onclick="document.getElementById('leaderModal').style.display='none'" class="w-10 h-10 glass rounded-full flex items-center justify-center border border-white/10 text-primary">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        
-        <div id="leaderList" class="flex-1 overflow-y-auto pr-2 pb-10">
+            <textarea id="cookies" placeholder="Paste Task Cookies Here..." class="w-full bg-black/60 p-4 rounded-2xl border border-white/10 outline-none text-[10px] h-24 mb-4"></textarea>
+            <div class="flex gap-3">
+                <button onclick="closeModal('taskModal')" class="flex-1 bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase">Cancel</button>
+                <button onclick="submitTask()" class="flex-1 bg-primary py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg">Submit</button>
             </div>
-    </div>
-
-    <div id="themeModal" class="fixed inset-0 bg-black/98 hidden items-center justify-center p-8 z-[200] animate__animated animate__fadeIn">
-        <div class="glass w-full max-w-sm p-8 rounded-[3rem] border-primary/20">
-            <h3 class="text-center font-black mb-8 text-sm uppercase tracking-widest opacity-50">Select Theme</h3>
-            <div class="grid grid-cols-2 gap-4 mb-8">
-                <button onclick="setTheme('midnight')" class="p-4 rounded-2xl bg-[#3b82f6]/20 border border-[#3b82f6] text-[10px] font-black">MIDNIGHT</button>
-                <button onclick="setTheme('sunset')" class="p-4 rounded-2xl bg-[#f97316]/20 border border-[#f97316] text-[10px] font-black text-[#f97316]">SUNSET</button>
-                <button onclick="setTheme('emerald')" class="p-4 rounded-2xl bg-[#10b981]/20 border border-[#10b981] text-[10px] font-black text-[#10b981]">EMERALD</button>
-                <button onclick="setTheme('purple')" class="p-4 rounded-2xl bg-[#a855f7]/20 border border-[#a855f7] text-[10px] font-black text-[#a855f7]">PURPLE</button>
-            </div>
-            <button onclick="document.getElementById('themeModal').style.display='none'" class="w-full bg-white/5 py-4 rounded-2xl font-black text-[10px] uppercase">Close</button>
         </div>
     </div>
 
-    <div id="taskModal" class="fixed inset-0 bg-black/98 hidden items-center justify-center p-6 z-[200] animate__animated animate__zoomIn">
-        <div class="glass w-full max-w-sm p-10 rounded-[3.5rem] border-primary/20">
-            <h3 class="text-center font-black mb-8 text-primary uppercase tracking-widest">Task Sync</h3>
-            <div class="space-y-4 mb-8">
-                <div class="bg-black/40 p-5 rounded-[1.5rem] flex justify-between items-center border border-white/5"><div><p class="text-[8px] opacity-40 uppercase mb-1">User</p><p id="genUser" class="text-xs text-primary font-mono font-bold"></p></div><button onclick="copyText('genUser')" class="text-white/20 hover:text-primary"><i class="fas fa-copy"></i></button></div>
-                <div class="bg-black/40 p-5 rounded-[1.5rem] flex justify-between items-center border border-white/5"><div><p class="text-[8px] opacity-40 uppercase mb-1">Pass</p><p id="genPass" class="text-xs text-primary font-mono font-bold"></p></div><button onclick="copyText('genPass')" class="text-white/20 hover:text-primary"><i class="fas fa-copy"></i></button></div>
+    <!-- THEME MODAL -->
+    <div id="themeModal" class="modal-overlay">
+        <div class="glass p-8 rounded-[3rem] w-[90%] max-w-xs border border-white/10">
+            <h3 class="text-center font-black text-sm uppercase mb-6 tracking-widest">Select Vibe</h3>
+            <div class="grid grid-cols-1 gap-3">
+                <button onclick="setTheme('midnight')" class="p-4 rounded-2xl bg-[#020617] border border-blue-500/30 text-xs font-bold">Midnight Blue</button>
+                <button onclick="setTheme('sunset')" class="p-4 rounded-2xl bg-[#1a0f0f] border border-orange-500/30 text-xs font-bold">Crimson Sunset</button>
+                <button onclick="setTheme('emerald')" class="p-4 rounded-2xl bg-[#061a14] border border-emerald-500/30 text-xs font-bold">Emerald City</button>
+                <button onclick="setTheme('purple')" class="p-4 rounded-2xl bg-[#0f0720] border border-purple-500/30 text-xs font-bold">Royal Purple</button>
+                <button onclick="setTheme('cyber')" class="p-4 rounded-2xl bg-[#000000] border border-cyan-500/30 text-xs font-bold">Cyberpunk</button>
             </div>
-            <textarea id="cookies" rows="4" class="w-full bg-white/5 p-5 rounded-[1.5rem] text-[10px] outline-none border border-white/5 focus:border-primary mb-6" placeholder="Paste Cookies..."></textarea>
-            <div class="flex gap-4"><button onclick="document.getElementById('taskModal').style.display='none'" class="flex-1 bg-white/5 py-4 rounded-[1.5rem] font-bold text-[10px]">BACK</button><button onclick="submitTask()" class="flex-1 bg-primary py-4 rounded-[1.5rem] font-black text-[10px] shadow-lg shadow-primary/20">SUBMIT</button></div>
+            <button onclick="closeModal('themeModal')" class="w-full mt-6 py-4 rounded-2xl bg-white/5 font-black text-[10px] uppercase">Close</button>
         </div>
     </div>
 
-    <script>
-        function switchTab(t) {
-            document.querySelectorAll('.app-section').forEach(s => s.classList.add('section-hidden'));
-            document.querySelectorAll('nav button').forEach(b => { b.classList.remove('active-tab'); b.classList.add('text-gray-500'); });
-            document.getElementById(t + '-sec').classList.remove('section-hidden');
-            document.getElementById(t + '-btn').classList.add('active-tab');
-            document.getElementById(t + '-btn').classList.remove('text-gray-500');
-        }
-        window.openTask = () => {
-            document.getElementById('taskModal').style.display = 'flex';
-            document.getElementById('genUser').innerText = 'if_worker_' + Math.floor(1000 + Math.random()*9000);
-            document.getElementById('genPass').innerText = 'pass' + Math.floor(100 + Math.random()*900) + '!!';
-        };
-    </script>
+    <!-- LEADERBOARD MODAL -->
+    <div id="leaderModal" class="modal-overlay">
+        <div class="glass p-6 rounded-[3rem] w-[90%] max-w-md h-[80vh] flex flex-col border border-white/10">
+            <h3 class="text-center font-black text-lg uppercase mb-6 italic text-primary">Hall of Fame</h3>
+            <div id="leaderList" class="flex-1 overflow-y-auto pr-2"></div>
+            <button onclick="closeModal('leaderModal')" class="w-full mt-4 py-4 rounded-2xl bg-white/5 font-black text-[10px] uppercase">Close</button>
+        </div>
+    </div>
+
 </body>
 </html>
